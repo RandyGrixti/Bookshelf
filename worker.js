@@ -789,7 +789,7 @@ function esc(value) {
 function safeCover(url) {
   if (typeof url !== "string") return "";
   var u = url.trim();
-  if (/^https?:\/\//i.test(u)) return u;
+  if (/^https?:\\/\\//i.test(u)) return u;
   return "";
 }
 
@@ -802,13 +802,13 @@ function dropboxUrl(path) {
 
 function sortTitleOf(book) {
   var t = String(book.title || "").trim();
-  return t.replace(/^the\s+/i, "");
+  return t.replace(/^the\\s+/i, "");
 }
 
 function lastNameOf(book) {
   var a = String(book.author || "").trim();
   if (!a) return "";
-  var words = a.split(/\s+/);
+  var words = a.split(/\\s+/);
   return words[words.length - 1];
 }
 
@@ -825,7 +825,7 @@ function releaseKeyOf(book) {
 }
 
 function yearOfKey(key) {
-  var m = String(key || "").match(/^(\d{4})/);
+  var m = String(key || "").match(/^(\\d{4})/);
   return m ? m[1] : "";
 }
 
