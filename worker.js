@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v9";
+const CACHE = "bookshelf-v10";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -735,6 +735,9 @@ function pageHtml() {
   .detailmain .detailtitle { margin-top: 0; }
   .detailmain .detailtitlewrap .btn { margin-top: 0; }
   .detailmain .stars { font-size: 28px; }
+  .ratingrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ratingrow .stars { flex: none; }
+  .ratingrow .btn { flex: none; }
   @media (min-width: 560px) {
     .detailtop { gap: 16px; }
     .detailcover { width: 150px; }
@@ -878,7 +881,7 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating, the Google rating when one is known, release date, pages, genres, publisher, and the Read button beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the Read button, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating with the Read button beside the stars, the Google rating when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -1457,8 +1460,11 @@ function renderDetail() {
     html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div></div>';
     html += '<div class="detailsection" data-section="author"><p class="detailauthor">' + esc(book.author || "") + "</p></div>";
   }
-  html += '<div class="detailsection" data-section="rating"><div><span class="fieldlabel">My rating</span>' + starStepsHtml(book.rating);
-  html += '<p class="muted">' + ((book.rating === null || book.rating === undefined) ? "Not rated yet." : "My rating: " + formatRating(book.rating) + " out of 5.") + "</p></div></div>";
+  var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
+  html += '<div class="detailsection" data-section="rating"><div><span class="fieldlabel">My rating</span><div class="ratingrow">' + starStepsHtml(book.rating);
+  html += '<button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div>";
+  if (book.rating !== null && book.rating !== undefined) html += '<p class="muted">My rating: ' + formatRating(book.rating) + " out of 5.</p>";
+  html += "</div></div>";
   if (book.google_rating !== null && book.google_rating !== undefined) {
     var g = formatRating(book.google_rating);
     if (book.ratings_count) g += " (" + Number(book.ratings_count).toLocaleString("en-US") + " ratings)";
@@ -1469,8 +1475,6 @@ function renderDetail() {
   if (book.page_count) html += '<div class="detailsection" data-section="pages">' + metaRow("Pages", String(book.page_count)) + "</div>";
   if (book.genres && book.genres.length) html += '<div class="detailsection" data-section="genres">' + metaRow("Genres", book.genres.join(", ")) + "</div>";
   if (book.publisher) html += '<div class="detailsection" data-section="publisher">' + metaRow("Publisher", book.publisher) + "</div>";
-  var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
-  html += '<div class="detailsection" data-section="read"><div><button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div></div>";
   html += "</div>";
   html += "</div>";
   html += '<div class="detailunder"></div>';
