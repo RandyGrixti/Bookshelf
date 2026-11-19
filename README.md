@@ -2,8 +2,20 @@
 
 Bookshelf is the private book collection app for Randy and Lisa. It shows
 every book that has been loaded into the collection, grouped into shelves,
-with cover view, star ratings, read marks, reader labels, custom
+with cover and spine views, star ratings, read marks, reader labels, custom
 lists, and a link to the file in Dropbox.
+
+## Views
+
+Cover view shows the book covers in a grid. Spine view shows the books as
+shelves of spines, like books on a real shelf, with a brass plaque in the
+middle at the top of each shelf showing the first and last books on it. The
+plaque range follows the sort: letters for title, author and genre sorts,
+with two or three letters when the shelf boundary needs them, and the year
+range for release date and date added sorts. Tap a spine and the book slides
+out of the shelf and turns around to show its cover. Tap the cover to open
+the book's details. Tap anywhere else to put the book back on the shelf.
+The details dialog only closes with its Close button.
 
 ## Files
 
@@ -67,7 +79,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v3`. When the app shell
+The service worker cache is named `bookshelf-v4`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v3`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v4`) and
 deploy. The new worker then clears the old cache on activation.

@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v3";
+const CACHE = "bookshelf-v4";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -683,6 +683,29 @@ function pageHtml() {
   .jumpbtn:disabled { opacity: .35; cursor: default; }
   .topbtn { position: fixed; right: 14px; bottom: 16px; z-index: 20; padding: 10px 14px; border-radius: 999px; border: 1px solid #d9a441; background: #d9a441; color: #241708; font-size: 15px; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
   .topbtn[hidden] { display: none; }
+  .btn.active { background: #d9a441; border-color: #d9a441; color: #241708; }
+  .viewrow { display: flex; gap: 8px; margin-bottom: 10px; }
+  .spineshelf { margin: 18px 0 6px; }
+  .plaque { display: block; width: fit-content; margin: 0 auto 8px; padding: 5px 18px; font-size: 15px; font-weight: 700; color: #3a2413; background: linear-gradient(#e8c96a, #c9a13a); border: 1px solid #8a6d1f; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.5); text-align: center; }
+  .spinebody { border: 1px solid #3a2413; background: #20150c; padding: 10px 8px 0; overflow: hidden; }
+  .spinerow { display: flex; gap: 4px; align-items: flex-end; }
+  .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 6px 0; overflow: hidden; }
+  .spinetext { writing-mode: vertical-rl; text-orientation: mixed; display: block; height: 100%; overflow: hidden; }
+  .spinetitle { font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; }
+  .spineauthor { font-size: 11px; color: #e8d3ac; white-space: nowrap; margin-left: 3px; }
+  .spinecheck { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 16px; height: 16px; border-radius: 50%; background: rgba(36, 23, 8, .9); color: #8fce7a; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
+  .flipoverlay { position: fixed; inset: 0; z-index: 38; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
+  .flipoverlay[hidden] { display: none; }
+  .flipstage { perspective: 1200px; }
+  .flipcard { width: 210px; height: 315px; position: relative; transform-style: preserve-3d; transition: transform .55s ease; transform: translateY(60px) scale(.8) rotateY(180deg); }
+  .flipcard.open { transform: translateY(0) scale(1) rotateY(0deg); }
+  .flipface { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 6px; overflow: hidden; }
+  .flipfront { padding: 0; border: 1px solid #3a2413; background: #2b1d12; display: block; width: 100%; height: 100%; }
+  .flipfront img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .flipback { transform: rotateY(180deg); border: 1px solid rgba(0,0,0,.45); display: flex; }
+  .flipback .spinetext { padding: 10px 0; }
+  .flipback .spinetitle { font-size: 19px; }
+  .flipback .spineauthor { font-size: 15px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
   .coverbox { padding: 0; border: 1px solid #3a2413; border-radius: 6px; overflow: hidden; background: #2b1d12; aspect-ratio: 2 / 3; position: relative; display: block; width: 100%; }
   .coverbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -751,6 +774,10 @@ function pageHtml() {
       <button type="button" class="btn" id="listsBtn">Lists</button>
       <button type="button" class="btn" id="aboutBtn">About</button>
     </div>
+  </div>
+  <div class="viewrow">
+    <button type="button" class="btn" id="spineView">Spine</button>
+    <button type="button" class="btn active" id="coverView">Cover</button>
   </div>
   <div class="searchrow">
     <input type="search" id="search" placeholder="Search title or author" aria-label="Search title or author">
@@ -827,9 +854,11 @@ function pageHtml() {
     <h2>About Bookshelf</h2>
     <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox.</p>
     <h3>Views</h3>
-    <p>Bookshelf shows the book covers in a grid. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
+    <p>Bookshelf has two views, Cover and Spine. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
     <h3>Shelves</h3>
-    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title.</p>
+    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p>
+    <h3>Spine view</h3>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each shelf is packed full, and a brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
     <h3>Sorting</h3>
     <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
     <h3>Search</h3>
@@ -837,13 +866,13 @@ function pageHtml() {
     <h3>Filters</h3>
     <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box narrows the shelves to one genre. The Read box shows all books, only books marked Read, or only books not yet read.</p>
     <h3>Jump to and back to top</h3>
-    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
+    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
     <p>Tap any book to open its details: cover, your rating, the Google rating when one is known, release date, pages, genres, and publisher, with the description below. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
-    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover. Tap the button again to clear the mark.</p>
+    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover, and as a small check on the spine in Spine view. Tap the button again to clear the mark.</p>
     <h3>Reader field</h3>
     <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once.</p>
     <h3>Lists</h3>
@@ -857,6 +886,10 @@ function pageHtml() {
   </div>
 </div>
 
+<div id="flipOverlay" class="flipoverlay" hidden>
+  <div class="flipstage"><div class="flipcard" id="flipCard"></div></div>
+</div>
+
 <script>
 var state = {
   books: [],
@@ -867,6 +900,7 @@ var state = {
   reader: "All",
   genre: "",
   readFilter: "all",
+  view: "cover",
   detailId: null
 };
 var listView = { selectedId: null, edit: false, picker: false, pickerQuery: "", renaming: false, confirmingDelete: false };
@@ -1097,6 +1131,119 @@ function coverBoxHtml(book) {
   return html;
 }
 
+var SPINE_COLORS = ["#7a3b2e", "#2e4a6b", "#3f5a3a", "#6b5a2e", "#5a2e5a", "#2e5a52", "#8a5a2e", "#4a3b2e", "#31456b", "#6b2e3a", "#3a5a6b", "#5a6b2e", "#71463a", "#39597a"];
+
+// One hash per book, so a book always gets the same spine colour and
+// height wherever it sits.
+function spineHash(book) {
+  var s = String(book.title || "") + "|" + String(book.author || "");
+  var h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function spineColor(book) { return SPINE_COLORS[spineHash(book) % SPINE_COLORS.length]; }
+
+function spineHeight(book) { return 150 + (spineHash(book) % 31); }
+
+function spineBoxHtml(book) {
+  var html = '<button type="button" class="spine" data-book-id="' + book.id + '" style="background:' + spineColor(book) + ";height:" + spineHeight(book) + 'px" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
+  html += '<span class="spinetext"><span class="spinetitle">' + esc(book.title) + '</span><span class="spineauthor">' + esc(book.author || "") + "</span></span>";
+  if (book.is_read) html += '<span class="spinecheck" aria-label="Read">&#10003;</span>';
+  html += "</button>";
+  return html;
+}
+
+// How many spines fit across one shelf. Spines are 36px wide with a
+// 4px gap, inside a shelf body with 8px of padding on each side.
+// Without a measurable layout (for example in a test) the full width
+// desktop shelf is used.
+function spinesPerShelf() {
+  var w = 0;
+  var wrap = document.querySelector(".wrap");
+  if (wrap && wrap.clientWidth) w = wrap.clientWidth - 28;
+  else if (window.innerWidth) w = Math.min(window.innerWidth - 28, 692);
+  if (!w || w < 100) w = 692;
+  var bodyW = w - 16;
+  var per = Math.floor((bodyW + 4) / 40);
+  return Math.max(4, per);
+}
+
+function chunkShelves(sorted) {
+  var per = spinesPerShelf();
+  var chunks = [];
+  for (var i = 0; i < sorted.length; i += per) chunks.push(sorted.slice(i, i + per));
+  return chunks;
+}
+
+// The plaque key is what a shelf range is read from: the sort key for
+// title, author and genre sorts, the year for date sorts.
+function plaqueKeyOf(book) {
+  if (state.sort === "release") return releaseYearOf(book);
+  if (state.sort === "added") return addedYearOf(book);
+  var k = sortKeyOf(book);
+  return k || groupLabelOf(book);
+}
+
+function plaquePrefix(key, len) {
+  var p = String(key || "").slice(0, len);
+  if (p && /[a-z]/i.test(p.charAt(0))) p = p.charAt(0).toUpperCase() + p.slice(1);
+  return p;
+}
+
+// Shortest prefix length that tells two keys apart, so the end of one
+// shelf and the start of the next never read the same.
+function diffPrefixLen(a, b) {
+  var A = String(a || ""), B = String(b || "");
+  var max = Math.max(A.length, B.length);
+  for (var k = 1; k <= max; k++) {
+    if (A.slice(0, k) !== B.slice(0, k)) return k;
+  }
+  return max;
+}
+
+// The plaque range for one shelf: first book to last book. The start
+// of the first shelf and the end of the last shelf are one letter,
+// since there is no neighbour to tell apart. Every other edge uses
+// the shortest prefix that differs from the neighbouring shelf, so
+// Albert to Billy then Buddy reads A - Bi and Bu - .... Date sorts
+// show the full year range instead.
+function plaqueRangeFor(chunks, i) {
+  var first = chunks[i][0];
+  var last = chunks[i][chunks[i].length - 1];
+  var start, end;
+  if (state.sort === "release" || state.sort === "added") {
+    start = plaqueKeyOf(first) || "No date";
+    end = plaqueKeyOf(last) || "No date";
+    return start + " - " + end;
+  }
+  if (i === 0) {
+    start = plaquePrefix(plaqueKeyOf(first), 1);
+  } else {
+    var prevLast = chunks[i - 1][chunks[i - 1].length - 1];
+    start = plaquePrefix(plaqueKeyOf(first), diffPrefixLen(plaqueKeyOf(prevLast), plaqueKeyOf(first)));
+  }
+  if (i === chunks.length - 1) {
+    end = plaquePrefix(plaqueKeyOf(last), 1);
+  } else {
+    var nextFirst = chunks[i + 1][0];
+    end = plaquePrefix(plaqueKeyOf(last), diffPrefixLen(plaqueKeyOf(last), plaqueKeyOf(nextFirst)));
+  }
+  return start + " - " + end;
+}
+
+// First letters of the first and last book on a shelf, for the
+// jump-to row: a letter jumps to the first shelf whose range holds it.
+function rangeLoHi(chunk) {
+  function firstLetter(key) {
+    var ch = String(key || "").trim().charAt(0).toUpperCase();
+    return (ch >= "A" && ch <= "Z") ? ch : "#";
+  }
+  var a = firstLetter(plaqueKeyOf(chunk[0]));
+  var b = firstLetter(plaqueKeyOf(chunk[chunk.length - 1]));
+  return { lo: a < b ? a : b, hi: a < b ? b : a };
+}
+
 function jumpLetterOf(label) {
   var ch = String(label || "").trim().charAt(0).toUpperCase();
   if (ch >= "A" && ch <= "Z") return ch;
@@ -1117,7 +1264,6 @@ function render() {
   renderGenreOptions();
   var filtered = filteredBooks();
   var sorted = sortBooks(filtered);
-  var groups = groupBooks(sorted);
   var total = state.books.length;
   if (filtered.length === total) {
     $("countLine").textContent = total === 1 ? "1 book." : total + " books.";
@@ -1125,17 +1271,32 @@ function render() {
     $("countLine").textContent = "Showing " + filtered.length + " of " + total + " books.";
   }
   $("empty").hidden = filtered.length !== 0;
-  renderJumpTo(groups);
   var html = "";
-  groups.forEach(function (group) {
-    html += '<section class="shelf"><h2 class="shelfhead">' + esc(group.label) + ' <span class="count">(' + group.books.length + ")</span></h2>";
-    html += '<div class="shelfbody">';
-    html += '<div class="grid">';
-    group.books.forEach(function (book) { html += coverBoxHtml(book); });
-    html += "</div>";
-    html += "</div>";
-    html += '<div class="shelfboard"></div></section>';
-  });
+  if (state.view === "spine") {
+    var chunks = chunkShelves(sorted);
+    var ranges = chunks.map(function (c, i) { return plaqueRangeFor(chunks, i); });
+    renderJumpTo(chunks.map(function (c, i) { return { label: ranges[i], books: c }; }));
+    chunks.forEach(function (chunk, i) {
+      var loHi = rangeLoHi(chunk);
+      html += '<section class="spineshelf"><div class="plaque" data-lo="' + esc(loHi.lo) + '" data-hi="' + esc(loHi.hi) + '">' + esc(ranges[i]) + "</div>";
+      html += '<div class="spinebody"><div class="spinerow">';
+      chunk.forEach(function (book) { html += spineBoxHtml(book); });
+      html += "</div></div>";
+      html += '<div class="shelfboard"></div></section>';
+    });
+  } else {
+    var groups = groupBooks(sorted);
+    renderJumpTo(groups);
+    groups.forEach(function (group) {
+      html += '<section class="shelf"><h2 class="shelfhead">' + esc(group.label) + ' <span class="count">(' + group.books.length + ")</span></h2>";
+      html += '<div class="shelfbody">';
+      html += '<div class="grid">';
+      group.books.forEach(function (book) { html += coverBoxHtml(book); });
+      html += "</div>";
+      html += "</div>";
+      html += '<div class="shelfboard"></div></section>';
+    });
+  }
   $("shelves").innerHTML = html;
 }
 
@@ -1470,12 +1631,21 @@ $("jumpto").addEventListener("click", function (e) {
   var t = e.target.closest("[data-jump]");
   if (!t || t.disabled) return;
   var letter = t.getAttribute("data-jump");
-  var heads = document.querySelectorAll(".shelfhead");
+  var heads = document.querySelectorAll(".shelfhead, .plaque");
   for (var i = 0; i < heads.length; i++) {
-    var first = heads[i].textContent.trim().charAt(0).toUpperCase();
-    var match = letter === "#" ? (first < "A" || first > "Z") : (first === letter);
+    var head = heads[i];
+    var match = false;
+    if (head.classList.contains("plaque")) {
+      var lo = head.getAttribute("data-lo") || "";
+      var hi = head.getAttribute("data-hi") || "";
+      if (letter === "#") match = lo < "A" || lo > "Z";
+      else match = lo <= letter && letter <= hi;
+    } else {
+      var first = head.textContent.trim().charAt(0).toUpperCase();
+      match = letter === "#" ? (first < "A" || first > "Z") : (first === letter);
+    }
     if (match) {
-      if (heads[i].scrollIntoView) heads[i].scrollIntoView();
+      if (head.scrollIntoView) head.scrollIntoView();
       return;
     }
   }
@@ -1505,9 +1675,75 @@ document.querySelectorAll(".chip").forEach(function (chip) {
 $("genreSel").addEventListener("change", function (e) { state.genre = e.target.value; render(); });
 $("readSel").addEventListener("change", function (e) { state.readFilter = e.target.value; render(); });
 
+function setView(view) {
+  state.view = view;
+  $("coverView").classList.toggle("active", view === "cover");
+  $("spineView").classList.toggle("active", view === "spine");
+  closeFlip(false);
+  render();
+}
+$("coverView").addEventListener("click", function () { setView("cover"); });
+$("spineView").addEventListener("click", function () { setView("spine"); });
+
+var resizeTimer = null;
+window.addEventListener("resize", function () {
+  if (state.view !== "spine") return;
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 150);
+});
+
+// The flip: tapping a spine slides the book out of the shelf and
+// turns it around to show the cover. The card starts on its spine
+// side, small and low, and turns to the cover side as it settles.
+function openFlip(id) {
+  var book = bookById(id);
+  if (!book) return;
+  var cover = safeCover(book.cover_url);
+  var html = "";
+  html += '<button type="button" class="flipface flipfront" data-flip-cover data-book-id="' + book.id + '" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
+  if (cover) {
+    html += '<img src="' + esc(cover) + '" alt="">';
+  } else {
+    html += '<span class="nocover"><span class="nctitle">' + esc(book.title) + '</span><span class="ncauthor">' + esc(book.author || "") + "</span></span>";
+  }
+  if (book.is_read) html += '<span class="covercheck" aria-label="Read">&#10003;</span>';
+  html += "</button>";
+  html += '<div class="flipface flipback" style="background:' + spineColor(book) + '">';
+  html += '<span class="spinetext"><span class="spinetitle">' + esc(book.title) + '</span><span class="spineauthor">' + esc(book.author || "") + "</span></span>";
+  html += "</div>";
+  $("flipCard").innerHTML = html;
+  $("flipCard").classList.remove("open");
+  $("flipOverlay").hidden = false;
+  setTimeout(function () { $("flipCard").classList.add("open"); }, 30);
+}
+
+function closeFlip(animate) {
+  if ($("flipOverlay").hidden) return;
+  if (animate) {
+    $("flipCard").classList.remove("open");
+    setTimeout(function () { $("flipOverlay").hidden = true; }, 600);
+  } else {
+    $("flipOverlay").hidden = true;
+  }
+}
+
+$("flipOverlay").addEventListener("click", function (e) {
+  var coverBtn = e.target.closest("[data-flip-cover]");
+  if (coverBtn) {
+    var id = Number(coverBtn.getAttribute("data-book-id"));
+    closeFlip(false);
+    openDetail(id);
+    return;
+  }
+  if (!e.target.closest(".flipcard")) closeFlip(true);
+});
+
 $("shelves").addEventListener("click", function (e) {
   var t = e.target.closest("[data-book-id]");
-  if (t) openDetail(Number(t.getAttribute("data-book-id")));
+  if (!t) return;
+  var id = Number(t.getAttribute("data-book-id"));
+  if (state.view === "spine") openFlip(id);
+  else openDetail(id);
 });
 
 $("detailBody").addEventListener("click", function (e) {
@@ -1607,8 +1843,7 @@ $("listsBody").addEventListener("keydown", function (e) {
 
 document.querySelectorAll(".backdrop").forEach(function (b) {
   b.addEventListener("click", function () {
-    if (b.parentElement.id === "detailOverlay") closeDetail();
-    else if (b.parentElement.id === "listsOverlay") closeLists();
+    if (b.parentElement.id === "listsOverlay") closeLists();
     else if (b.parentElement.id === "aboutOverlay") $("aboutOverlay").hidden = true;
   });
 });
@@ -1619,6 +1854,7 @@ document.addEventListener("keydown", function (e) {
   else if (!$("listsOverlay").hidden) closeLists();
   else if (!$("aboutOverlay").hidden) $("aboutOverlay").hidden = true;
   else if (!$("filtersPanel").hidden) setFiltersOpen(false);
+  else if (!$("flipOverlay").hidden) closeFlip(true);
 });
 
 function loadList() {
