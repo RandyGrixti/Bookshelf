@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v12";
+const CACHE = "bookshelf-v13";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1568,6 +1568,13 @@ function layoutDetail() {
   if (!main) return;
   var sections = Array.prototype.slice.call(body.querySelectorAll(".detailsection"));
   if (!sections.length) return;
+  // Do not move sections while an edit field has focus. Re-parenting a
+  // focused input dismisses the soft keyboard on a phone: opening the
+  // keyboard fires a resize, which calls this again, so the layout
+  // stays exactly where it is until the field is blurred. The first
+  // placement is unaffected: renderDetail runs this before focus is set.
+  var ae = document.activeElement;
+  if (ae && (ae.id === "editTitle" || ae.id === "editAuthor")) return;
   sections.forEach(function (s) { main.appendChild(s); });
   var coverHeight = 0;
   if (cover) {
