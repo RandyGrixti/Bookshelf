@@ -1,0 +1,1 @@
+{"$schema":"node_modules/wrangler/config-schema.json","compatibility_date":"2026-09-27","d1_databases":[{"binding":"DB","database_id":"5e0174b0-aca0-4264-a882-61ac6bdf1ce3","database_name":"bookshelf"}],"main":"worker.js","name":"bookshelf","observability":{"logs":{"enabled":true}},"vars":{},"workers_dev":true}
