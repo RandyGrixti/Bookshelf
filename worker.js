@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v7";
+const CACHE = "bookshelf-v8";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -868,7 +868,7 @@ function pageHtml() {
     <h3>Shelves</h3>
     <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p>
     <h3>Spine view</h3>
-    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, and a brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
     <h3>Sorting</h3>
     <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
     <h3>Search</h3>
@@ -1156,33 +1156,64 @@ function spineColor(book) { return SPINE_COLORS[spineHash(book) % SPINE_COLORS.l
 
 function spineHeight(book) { return 150 + (spineHash(book) % 31); }
 
-function spineBoxHtml(book) {
-  var html = '<button type="button" class="spine" data-book-id="' + book.id + '" style="background:' + spineColor(book) + ";height:" + spineHeight(book) + 'px" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
+function spineBoxHtml(book, width) {
+  var w = width ? ";width:" + width.toFixed(3) + "px" : "";
+  var html = '<button type="button" class="spine" data-book-id="' + book.id + '" style="background:' + spineColor(book) + ";height:" + spineHeight(book) + "px" + w + '" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
   html += '<span class="spinetext"><span class="spinetitle">' + esc(book.title) + '</span><span class="spineauthor">' + esc(book.author || "") + "</span></span>";
   if (book.is_read) html += '<span class="spinecheck" aria-label="Read">&#10003;</span>';
   html += "</button>";
   return html;
 }
 
-// How many spines fit across one shelf. Spines are 36px wide with a
-// 2px gap, inside a shelf body with 8px of padding on each side.
-// Without a measurable layout (for example in a test) the full width
-// desktop shelf is used.
-function spinesPerShelf() {
+// Exact-fill spine layout for one shelf body width. The spines on a
+// full shelf share the body width exactly, so spines plus 2px gaps
+// equal the body width with no leftover space at the end. One more
+// spine fits than at the old 36px width, so the spines come out a
+// little thinner. Never thinner than 32px, so the two-line spine text
+// stays readable: if one more would go under 32px, fit one fewer
+// instead. The 32px floor below that only bites on a screen too
+// narrow for four readable spines, which no real phone reaches.
+function spineLayoutFor(bodyW) {
+  var per = Math.max(4, Math.floor((bodyW + 2) / 38));
+  var count = per + 1;
+  var width = (bodyW - 2 * (count - 1)) / count;
+  if (width < 32) {
+    count = per;
+    width = (bodyW - 2 * (count - 1)) / count;
+  }
+  if (width < 32) width = 32;
+  return { count: count, width: width };
+}
+
+// The layout for the shelf on this screen. The shelf body has 8px of
+// padding on each side, inside a wrap with 14px of padding on each
+// side. Without a measurable layout (for example in a test) the full
+// width desktop shelf is used.
+function spineLayout() {
   var w = 0;
   var wrap = document.querySelector(".wrap");
   if (wrap && wrap.clientWidth) w = wrap.clientWidth - 28;
   else if (window.innerWidth) w = Math.min(window.innerWidth - 28, 692);
   if (!w || w < 100) w = 692;
-  var bodyW = w - 16;
-  var per = Math.floor((bodyW + 2) / 38);
-  return Math.max(4, per);
+  var layout = spineLayoutFor(w - 16);
+  layout.bodyW = w - 16;
+  return layout;
 }
 
-function chunkShelves(sorted) {
-  var per = spinesPerShelf();
+// How many spines fit across one shelf.
+function spinesPerShelf() {
+  return spineLayout().count;
+}
+
+// How wide each spine is on a full shelf.
+function spineWidth() {
+  return spineLayout().width;
+}
+
+function chunkShelves(sorted, per) {
+  var n = per || spinesPerShelf();
   var chunks = [];
-  for (var i = 0; i < sorted.length; i += per) chunks.push(sorted.slice(i, i + per));
+  for (var i = 0; i < sorted.length; i += n) chunks.push(sorted.slice(i, i + n));
   return chunks;
 }
 
@@ -1283,14 +1314,15 @@ function render() {
   $("empty").hidden = filtered.length !== 0;
   var html = "";
   if (state.view === "spine") {
-    var chunks = chunkShelves(sorted);
+    var layout = spineLayout();
+    var chunks = chunkShelves(sorted, layout.count);
     var ranges = chunks.map(function (c, i) { return plaqueRangeFor(chunks, i); });
     renderJumpTo(chunks.map(function (c, i) { return { label: ranges[i], books: c }; }));
     chunks.forEach(function (chunk, i) {
       var loHi = rangeLoHi(chunk);
       html += '<section class="spineshelf"><div class="plaque" data-lo="' + esc(loHi.lo) + '" data-hi="' + esc(loHi.hi) + '">' + esc(ranges[i]) + "</div>";
       html += '<div class="spinebody"><div class="spinerow">';
-      chunk.forEach(function (book) { html += spineBoxHtml(book); });
+      chunk.forEach(function (book) { html += spineBoxHtml(book, layout.width); });
       html += "</div></div>";
       html += '<div class="shelfboard"></div></section>';
     });

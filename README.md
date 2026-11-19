@@ -10,7 +10,8 @@ lists, and a link to the file in Dropbox.
 Spine view is the default. It shows the books as
 shelves of spines, like books on a real shelf, with a brass plaque in the
 middle at the top of each shelf showing the first and last books on it. Each
-spine shows the title and author on two lines. The
+spine shows the title and author on two lines. The spines on a shelf share
+its width exactly, so a full shelf has no empty space at the end. The
 plaque range follows the sort: letters for title, author and genre sorts,
 with two or three letters when the shelf boundary needs them, and the year
 range for release date and date added sorts. Tap a spine and the book slides
@@ -87,7 +88,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v7`. When the app shell
+The service worker cache is named `bookshelf-v8`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v7`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v8`) and
 deploy. The new worker then clears the old cache on activation.
