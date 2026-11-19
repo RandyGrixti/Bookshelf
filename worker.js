@@ -358,6 +358,7 @@ var GENRE_CANONICAL = {
   "music": "Music",
   "mystery and crime": "Mystery & Crime",
   "nature and wildlife": "Nature & Wildlife",
+  "non-fiction": "Non-Fiction",
   "outdoor recreation": "Outdoor Recreation",
   "paranormal romance": "Paranormal Romance",
   "parenting": "Parenting",
@@ -928,7 +929,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v14";
+const CACHE = "bookshelf-v15";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1029,7 +1030,7 @@ function pageHtml() {
   .chip.active { background: #d9a441; border-color: #d9a441; color: #241708; }
   .muted { color: #c9b69a; font-size: 14px; }
   p, li { line-height: 1.5; }
-  .notice { padding: 10px 12px; border-radius: 8px; margin: 0 0 12px; background: #1e3a24; border: 1px solid #2f6b3a; color: #d9f2dd; font-size: 15px; }
+  .notice { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60; width: calc(100% - 24px); max-width: 640px; padding: 10px 12px; border-radius: 8px; margin: 0; background: #1e3a24; border: 1px solid #2f6b3a; color: #d9f2dd; font-size: 15px; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
   .notice.error { background: #3a1e1e; border-color: #6b2f2f; color: #f2d9d9; }
   #loading, #loadError { text-align: center; padding: 24px 0; color: #c9b69a; font-size: 16px; }
   .shelf { margin: 18px 0 6px; }
@@ -1090,10 +1091,30 @@ function pageHtml() {
   .lockednote { background: #2e2113; border: 1px solid #4a3220; border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; font-size: 14px; color: #c9b69a; }
   .lockednote .btn { margin-left: 8px; }
   .editbtns { display: flex; gap: 8px; margin: 8px 0 12px; }
+  .genrepicker { position: relative; margin: 6px 0; }
+  .genrefield { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; padding: 6px 10px; background: #2b1d12; border: 1px solid #4a3220; border-radius: 6px; cursor: pointer; box-sizing: border-box; }
+  .genrefield:focus { outline: 2px solid #d9a441; outline-offset: 1px; }
+  .genrechip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 9px; background: #d9a441; color: #241708; border-radius: 999px; font-size: 14px; font-weight: 600; }
+  .genrechipx { background: transparent; border: 0; color: #241708; font-size: 15px; font-weight: 700; line-height: 1; padding: 2px 5px; cursor: pointer; }
+  .genrefieldhint { color: #c9b69a; font-size: 15px; }
+  .genrechev { margin-left: auto; color: #c9b69a; font-size: 16px; flex: none; }
+  .genrepanel { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5; max-height: 260px; overflow-y: auto; background: #241a10; border: 1px solid #4a3220; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,.6); padding: 4px 0; }
+  .genrepanel[hidden] { display: none; }
+  .genrenote { padding: 6px 12px; color: #c9b69a; font-size: 13px; }
+  .genrerow { display: flex; align-items: center; }
+  .genrename { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; color: #f2e8d5; font-size: 15px; padding: 8px 12px; cursor: pointer; }
+  .genrename:hover { background: #33220f; }
+  .genrename:disabled { cursor: default; color: #8fce7a; }
+  .genrerow.disabled .genrename:disabled { color: #8a7a63; }
+  .genrecheck { color: #8fce7a; font-weight: 700; }
+  .genreexp { flex: none; background: transparent; border: 0; color: #c9b69a; font-size: 13px; padding: 8px 10px; cursor: pointer; }
+  .genrerow.gensub .genrename { padding-left: 28px; font-size: 14px; }
+  .genrepanelfoot { display: flex; justify-content: flex-end; padding: 6px 8px; border-top: 1px solid #33220f; }
   .detailtop { display: flex; gap: 12px; align-items: flex-start; }
   .detailcoverwrap { flex: none; }
   .detailmain { flex: 1; min-width: 0; }
   .detailsection { overflow: hidden; }
+  .detailsection[data-section="edit"] { overflow: visible; }
   .detailunder { }
   .detailmain .detailtitle { margin-top: 0; }
   .detailmain .detailtitlewrap .btn { margin-top: 0; }
@@ -1343,6 +1364,7 @@ function firstGenreOf(book) {
 // belongs to Mystery & Crime.
 var GENRES = [
   "Fiction",
+  "Non-Fiction",
   "Mystery & Crime",
   "Thriller & Suspense",
   "Science Fiction",
@@ -1493,6 +1515,39 @@ function genreMatches(book, filter) {
   }
   return false;
 }
+
+// Subgenres grouped under their level-1 genre, in canonical table
+// spelling, for the edit form's two-level genre picker. The page has
+// no copy of the server's GENRE_CANONICAL map, so the display name is
+// derived from the subgenre key: capitalize each word, "and" becomes
+// "&", and "ya" becomes "YA". That matches the table's spelling for
+// all 104 subgenres today, and the harness re-checks it against the
+// server map on every run, so a table change fails loudly instead of
+// silently showing the wrong name.
+function titleCaseGenre(s) {
+  return String(s || "").split(" ").map(function (word) {
+    if (word === "and") return "&";
+    return word.split("-").map(function (part) {
+      if (part === "ya") return "YA";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }).join("-");
+  }).join(" ");
+}
+
+var SUBGENRES_BY_PARENT = {};
+Object.keys(SUBGENRE_PARENT).forEach(function (key) {
+  var parent = SUBGENRE_PARENT[key];
+  if (!SUBGENRES_BY_PARENT[parent]) SUBGENRES_BY_PARENT[parent] = [];
+  SUBGENRES_BY_PARENT[parent].push(titleCaseGenre(key));
+});
+
+// Every table value by its normalized name, for validating picks:
+// the 28 level-1 genres plus the 104 subgenres in canonical spelling.
+var GENRE_NAMES = {};
+GENRES.forEach(function (g) { GENRE_NAMES[normGenre(g)] = g; });
+Object.keys(SUBGENRE_PARENT).forEach(function (key) {
+  GENRE_NAMES[normGenre(key)] = titleCaseGenre(key);
+});
 
 function releaseKeyOf(book) {
   var d = String(book.published_date || "").trim();
@@ -1889,6 +1944,9 @@ function starStepsHtml(rating) {
 function openDetail(id) {
   state.detailId = id;
   detailEditing = false;
+  editGenres = null;
+  genreExpanded = {};
+  genrePanelOpen = false;
   $("detailOverlay").hidden = false;
   renderDetail();
   if (window.requestAnimationFrame) window.requestAnimationFrame(layoutDetail);
@@ -1897,10 +1955,21 @@ function openDetail(id) {
 function closeDetail() {
   state.detailId = null;
   detailEditing = false;
+  editGenres = null;
+  genreExpanded = {};
+  genrePanelOpen = false;
   $("detailOverlay").hidden = true;
 }
 
 var detailEditing = false;
+
+// Genres picked in the open edit form (canonical names), the parents
+// whose subgenres are expanded in the picker panel, and whether the
+// panel is open. Reset whenever edit mode is entered or left, so one
+// book's picks never leak into another's.
+var editGenres = null;
+var genreExpanded = {};
+var genrePanelOpen = false;
 
 // How many leading detail sections fit beside the cover. A section
 // that would take the column past the bottom edge of the cover moves
@@ -1987,9 +2056,12 @@ function renderDetail() {
     html += '<input type="number" class="editinput" id="editPages" min="1" step="1" value="' + (book.page_count ? String(book.page_count) : "") + '">';
     html += '<label class="fieldlabel" for="editPublisher">Publisher</label>';
     html += '<input type="text" class="editinput" id="editPublisher" maxlength="200" value="' + esc(book.publisher || "") + '">';
-    html += '<label class="fieldlabel" for="editGenres">Genres</label>';
-    html += '<input type="text" class="editinput" id="editGenres" maxlength="200" value="' + esc((book.genres || []).join(", ")) + '">';
-    html += '<p class="muted">Genres from the Bookshelf list, separated by commas.</p>';
+    html += '<label class="fieldlabel" id="editGenresLabel">Genres</label>';
+    html += '<div class="genrepicker" id="editGenres">';
+    html += '<div class="genrefield" id="genreField" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-labelledby="editGenresLabel"><span class="genrechips" id="genreChips"></span><span class="genrefieldhint" id="genreFieldHint">Pick genres</span><span class="genrechev" aria-hidden="true">&#9662;</span></div>';
+    html += '<div class="genrepanel" id="genrePanel" hidden></div>';
+    html += '</div>';
+    html += '<p class="muted">Pick up to 5 genres from the list.</p>';
     html += '<div class="editbtns"><button type="button" class="btn primary" data-action="save-details">Save</button>';
     html += '<button type="button" class="btn" data-action="cancel-title-author">Cancel</button></div>';
     html += "</div>";
@@ -2047,9 +2119,102 @@ function renderDetail() {
   }
   html += "</div>";
   $("detailBody").innerHTML = html;
+  if (detailEditing) {
+    if (editGenres === null) editGenres = validPickedGenres(book.genres);
+    renderGenreChips();
+    renderGenrePanel();
+    setGenrePanel(genrePanelOpen);
+  }
   layoutDetail();
   var coverImg = $("detailBody").querySelector(".detailcover");
   if (coverImg && !coverImg.complete) coverImg.addEventListener("load", layoutDetail);
+}
+
+// The genre picker in the edit form: the book's genres as removable
+// chips, and a panel with the 28 level-1 genres, each expandable to
+// its subgenres. Only table values can be picked, so a save can never
+// be rejected for a bad genre. Picks are kept in editGenres and sent
+// to the server as one comma-joined string, exactly what the old text
+// input produced, so handleSetDetails needs no change. At most 5.
+function validPickedGenres(list) {
+  var out = [];
+  (list || []).forEach(function (g) {
+    var canonical = GENRE_NAMES[normGenre(g)];
+    if (canonical && out.indexOf(canonical) === -1) out.push(canonical);
+  });
+  return out.slice(0, 5);
+}
+
+function renderGenreChips() {
+  var wrap = $("genreChips");
+  if (!wrap) return;
+  var picked = editGenres || [];
+  var html = "";
+  picked.forEach(function (g) {
+    html += '<span class="genrechip">' + esc(g) + '<button type="button" class="genrechipx" data-action="genre-remove" data-genre="' + esc(g) + '" aria-label="Remove ' + esc(g) + '">&#215;</button></span>';
+  });
+  wrap.innerHTML = html;
+  var hint = $("genreFieldHint");
+  if (hint) hint.hidden = picked.length > 0;
+  var field = $("genreField");
+  if (field) field.setAttribute("aria-expanded", genrePanelOpen ? "true" : "false");
+}
+
+function renderGenrePanel() {
+  var panel = $("genrePanel");
+  if (!panel) return;
+  var scroll = panel.scrollTop;
+  var picked = editGenres || [];
+  var full = picked.length >= 5;
+  var html = "";
+  html += '<div class="genrenote">' + (full ? "Up to 5 genres." : picked.length + " of 5 picked.") + "</div>";
+  GENRES.forEach(function (parent) {
+    var subs = SUBGENRES_BY_PARENT[parent] || [];
+    var isPicked = picked.indexOf(parent) !== -1;
+    var expanded = !!genreExpanded[parent];
+    html += '<div class="genrerow' + (isPicked ? " picked" : "") + (full && !isPicked ? " disabled" : "") + '">';
+    html += '<button type="button" class="genrename" data-action="genre-pick" data-genre="' + esc(parent) + '"' + ((isPicked || full) ? " disabled" : "") + ">" + esc(parent) + (isPicked ? ' <span class="genrecheck" aria-label="picked">&#10003;</span>' : "") + "</button>";
+    if (subs.length) html += '<button type="button" class="genreexp" data-action="genre-expand" data-genre="' + esc(parent) + '" aria-expanded="' + (expanded ? "true" : "false") + '" aria-label="' + (expanded ? "Hide" : "Show") + " subgenres of " + esc(parent) + '">' + (expanded ? "&#9650;" : "&#9660;") + "</button>";
+    html += "</div>";
+    if (expanded) {
+      subs.forEach(function (sub) {
+        var subPicked = picked.indexOf(sub) !== -1;
+        html += '<div class="genrerow gensub' + (subPicked ? " picked" : "") + (full && !subPicked ? " disabled" : "") + '">';
+        html += '<button type="button" class="genrename" data-action="genre-pick" data-genre="' + esc(sub) + '"' + ((subPicked || full) ? " disabled" : "") + ">" + esc(sub) + (subPicked ? ' <span class="genrecheck" aria-label="picked">&#10003;</span>' : "") + "</button>";
+        html += "</div>";
+      });
+    }
+  });
+  html += '<div class="genrepanelfoot"><button type="button" class="btn small" data-action="genre-done">Done</button></div>';
+  panel.innerHTML = html;
+  panel.scrollTop = scroll;
+}
+
+function setGenrePanel(open) {
+  var panel = $("genrePanel");
+  var field = $("genreField");
+  if (!panel || !field) return;
+  genrePanelOpen = open;
+  panel.hidden = !open;
+  field.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function pickGenre(name) {
+  if (editGenres === null) editGenres = [];
+  if (editGenres.length >= 5) return;
+  if (editGenres.indexOf(name) !== -1) return;
+  if (!GENRE_NAMES[normGenre(name)]) return;
+  editGenres.push(name);
+  renderGenreChips();
+  renderGenrePanel();
+}
+
+function removeGenre(name) {
+  if (editGenres === null) return;
+  var i = editGenres.indexOf(name);
+  if (i !== -1) editGenres.splice(i, 1);
+  renderGenreChips();
+  renderGenrePanel();
 }
 
 function saveDetails(book) {
@@ -2059,9 +2224,9 @@ function saveDetails(book) {
   var releaseEl = $("editRelease");
   var pagesEl = $("editPages");
   var publisherEl = $("editPublisher");
-  var genresEl = $("editGenres");
   var coverEl = $("editCover");
   if (!titleEl || !authorEl) return;
+  if (editGenres === null) editGenres = validPickedGenres(book.genres);
   var details = {
     id: book.id,
     title: titleEl.value,
@@ -2070,7 +2235,7 @@ function saveDetails(book) {
     published_date: releaseEl ? releaseEl.value : "",
     page_count: pagesEl ? pagesEl.value : "",
     publisher: publisherEl ? publisherEl.value : "",
-    genres: genresEl ? genresEl.value : ""
+    genres: editGenres.join(", ")
   };
   var coverFile = coverEl && coverEl.files && coverEl.files[0] ? coverEl.files[0] : null;
   var chain = Promise.resolve();
@@ -2095,6 +2260,9 @@ function saveDetails(book) {
     return postJson("/api/set-details", details);
   }).then(function (data) {
     detailEditing = false;
+    editGenres = null;
+    genreExpanded = {};
+    genrePanelOpen = false;
     return refreshData().then(function () { return data; });
   }).then(function (data) {
     var msg = "Saved.";
@@ -2321,6 +2489,19 @@ document.addEventListener("click", function (e) {
   setFiltersOpen(false);
 });
 
+// Tapping outside the genre picker closes its panel. Clicks the
+// detail handler already dealt with (a pick, an expand, a remove,
+// Done) never reach here: they stop propagation there. A tap on the
+// field itself is guarded below, so opening the panel does not close
+// it again in the same tap.
+document.addEventListener("click", function (e) {
+  var panel = $("genrePanel");
+  if (!panel || panel.hidden) return;
+  if (panel.contains(e.target)) return;
+  if (e.target.closest && e.target.closest("#genreField")) return;
+  setGenrePanel(false);
+});
+
 $("jumpto").addEventListener("click", function (e) {
   var t = e.target.closest("[data-jump]");
   if (!t || t.disabled) return;
@@ -2444,7 +2625,13 @@ $("shelves").addEventListener("click", function (e) {
 
 $("detailBody").addEventListener("click", function (e) {
   var t = e.target.closest("[data-action]");
-  if (!t) return;
+  if (!t) {
+    // Tapping the genre field opens or closes its panel. Anything
+    // with a data-action inside the field (a chip's remove button)
+    // is handled above instead, so it never toggles the panel.
+    if (e.target.closest("#genreField") && detailEditing) setGenrePanel(!genrePanelOpen);
+    return;
+  }
   var action = t.getAttribute("data-action");
   var book = bookById(state.detailId);
   if (!book) return;
@@ -2458,17 +2645,38 @@ $("detailBody").addEventListener("click", function (e) {
   else if (action === "add-to-list") addDetailToList(book);
   else if (action === "edit-title-author") {
     detailEditing = true;
+    editGenres = validPickedGenres(book.genres);
+    genreExpanded = {};
+    genrePanelOpen = false;
     renderDetail();
     var inp = $("editTitle");
     if (inp) { inp.focus(); inp.select(); }
   }
   else if (action === "save-details") saveDetails(book);
   else if (action === "set-locked-off") setLocked(book, false);
-  else if (action === "cancel-title-author") { detailEditing = false; renderDetail(); }
+  else if (action === "cancel-title-author") { detailEditing = false; editGenres = null; genreExpanded = {}; genrePanelOpen = false; renderDetail(); }
+  else if (action === "genre-pick") { e.stopPropagation(); pickGenre(t.getAttribute("data-genre")); }
+  else if (action === "genre-expand") { e.stopPropagation(); var p = t.getAttribute("data-genre"); genreExpanded[p] = !genreExpanded[p]; renderGenrePanel(); }
+  else if (action === "genre-remove") { e.stopPropagation(); removeGenre(t.getAttribute("data-genre")); }
+  else if (action === "genre-done") { e.stopPropagation(); setGenrePanel(false); }
 });
 
 $("detailBody").addEventListener("keydown", function (e) {
-  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor" || e.target.id === "editRelease" || e.target.id === "editPages" || e.target.id === "editPublisher" || e.target.id === "editGenres")) {
+  // Escape closes the genre panel first, not the dialog: stopping
+  // the event here keeps the document handler from closing the
+  // details while the panel is open.
+  if (e.key === "Escape" && genrePanelOpen) {
+    e.preventDefault();
+    e.stopPropagation();
+    setGenrePanel(false);
+    return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && e.target.id === "genreField") {
+    e.preventDefault();
+    setGenrePanel(!genrePanelOpen);
+    return;
+  }
+  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor" || e.target.id === "editRelease" || e.target.id === "editPages" || e.target.id === "editPublisher")) {
     e.preventDefault();
     var book = bookById(state.detailId);
     if (book) saveDetails(book);
