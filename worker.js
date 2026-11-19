@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v5";
+const CACHE = "bookshelf-v6";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -688,8 +688,8 @@ function pageHtml() {
   .spineshelf { margin: 18px 0 6px; }
   .plaque { display: block; width: fit-content; margin: 0 auto 8px; padding: 5px 18px; font-size: 15px; font-weight: 700; color: #3a2413; background: linear-gradient(#e8c96a, #c9a13a); border: 1px solid #8a6d1f; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.5); text-align: center; }
   .spinebody { border: 1px solid #3a2413; background: #20150c; padding: 10px 8px 0; overflow: hidden; }
-  .spinerow { display: flex; gap: 4px; align-items: flex-end; }
-  .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 6px 0; overflow: hidden; }
+  .spinerow { display: flex; gap: 2px; align-items: flex-end; }
+  .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 3px 0; overflow: hidden; }
   .spinetext { writing-mode: vertical-rl; text-orientation: mixed; display: block; height: 100%; overflow: hidden; }
   .spinetitle { display: block; font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; margin-left: 3px; }
   .spineauthor { display: block; font-size: 11px; color: #e8d3ac; white-space: nowrap; }
@@ -730,6 +730,8 @@ function pageHtml() {
   .detailtop { display: flex; gap: 12px; align-items: flex-start; }
   .detailcoverwrap { flex: none; }
   .detailmain { flex: 1; min-width: 0; }
+  .detailsection { overflow: hidden; }
+  .detailunder { }
   .detailmain .detailtitle { margin-top: 0; }
   .detailmain .detailtitlewrap .btn { margin-top: 0; }
   .detailmain .stars { font-size: 28px; }
@@ -740,6 +742,7 @@ function pageHtml() {
   }
   .desc { line-height: 1.5; }
   .detailtop + .desc { margin-top: 14px; }
+  .detailunder + .desc { margin-top: 14px; }
   .inlinerow { display: flex; align-items: center; gap: 8px; }
   .fieldlabel.inline { margin-bottom: 0; flex: none; }
   select.narrowselect { width: auto; min-width: 110px; flex: none; }
@@ -875,7 +878,7 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating, the Google rating when one is known, release date, pages, genres, publisher, and the Read button beside it, in that order. The description comes right after the Read button, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating, the Google rating when one is known, release date, pages, genres, publisher, and the Read button beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the Read button, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -1162,7 +1165,7 @@ function spineBoxHtml(book) {
 }
 
 // How many spines fit across one shelf. Spines are 36px wide with a
-// 4px gap, inside a shelf body with 8px of padding on each side.
+// 2px gap, inside a shelf body with 8px of padding on each side.
 // Without a measurable layout (for example in a test) the full width
 // desktop shelf is used.
 function spinesPerShelf() {
@@ -1172,7 +1175,7 @@ function spinesPerShelf() {
   else if (window.innerWidth) w = Math.min(window.innerWidth - 28, 692);
   if (!w || w < 100) w = 692;
   var bodyW = w - 16;
-  var per = Math.floor((bodyW + 4) / 40);
+  var per = Math.floor((bodyW + 2) / 38);
   return Math.max(4, per);
 }
 
@@ -1347,6 +1350,51 @@ function closeDetail() {
 
 var detailEditing = false;
 
+// How many leading detail sections fit beside the cover. A section
+// that would take the column past the bottom edge of the cover moves
+// below the cover whole, with the sections after it, so a label and
+// its value never split apart.
+function splitDetailSections(coverHeight, sectionHeights) {
+  var n = 0;
+  var used = 0;
+  for (var i = 0; i < sectionHeights.length; i++) {
+    if (used + sectionHeights[i] > coverHeight) break;
+    used += sectionHeights[i];
+    n++;
+  }
+  return n;
+}
+
+// Move detail sections between the column beside the cover and the
+// full-width area below it, using real rendered heights. Sections are
+// measured back in the narrow column first, so the split follows the
+// sizes on this screen. Runs after every detail render, which includes
+// resize, and again when the cover image finishes loading.
+function layoutDetail() {
+  var body = $("detailBody");
+  if (!body) return;
+  var top = body.querySelector(".detailtop");
+  var under = body.querySelector(".detailunder");
+  if (!top || !under) return;
+  var main = top.querySelector(".detailmain");
+  var cover = top.querySelector(".detailcover");
+  if (!main) return;
+  var sections = Array.prototype.slice.call(body.querySelectorAll(".detailsection"));
+  if (!sections.length) return;
+  sections.forEach(function (s) { main.appendChild(s); });
+  var coverHeight = 0;
+  if (cover) {
+    coverHeight = cover.offsetHeight;
+    if (!coverHeight) {
+      var w = parseFloat(window.getComputedStyle(cover).width) || 110;
+      coverHeight = w * 1.5;
+    }
+  }
+  var heights = sections.map(function (s) { return s.offsetHeight; });
+  var keep = splitDetailSections(coverHeight, heights);
+  sections.slice(keep).forEach(function (s) { under.appendChild(s); });
+}
+
 function renderDetail() {
   var book = bookById(state.detailId);
   if (!book) { closeDetail(); return; }
@@ -1359,33 +1407,36 @@ function renderDetail() {
   html += "</div>";
   html += '<div class="detailmain">';
   if (detailEditing) {
+    html += '<div class="detailsection" data-section="edit">';
     html += '<label class="fieldlabel" for="editTitle">Title</label>';
     html += '<input type="text" class="editinput" id="editTitle" maxlength="200" value="' + esc(book.title) + '">';
     html += '<label class="fieldlabel" for="editAuthor">Author</label>';
     html += '<input type="text" class="editinput" id="editAuthor" maxlength="120" value="' + esc(book.author || "") + '">';
     html += '<div class="editbtns"><button type="button" class="btn primary" data-action="save-title-author">Save</button>';
     html += '<button type="button" class="btn" data-action="cancel-title-author">Cancel</button></div>';
+    html += "</div>";
   } else {
-    html += '<div class="detailtitlewrap"><h2 class="detailtitle">' + esc(book.title) + "</h2>";
-    html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div>';
-    html += '<p class="detailauthor">' + esc(book.author || "") + "</p>";
+    html += '<div class="detailsection" data-section="title"><div class="detailtitlewrap"><h2 class="detailtitle">' + esc(book.title) + "</h2>";
+    html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div></div>';
+    html += '<div class="detailsection" data-section="author"><p class="detailauthor">' + esc(book.author || "") + "</p></div>";
   }
-  html += '<div><span class="fieldlabel">My rating</span>' + starStepsHtml(book.rating);
-  html += '<p class="muted">' + ((book.rating === null || book.rating === undefined) ? "Not rated yet." : "My rating: " + formatRating(book.rating) + " out of 5.") + "</p></div>";
+  html += '<div class="detailsection" data-section="rating"><div><span class="fieldlabel">My rating</span>' + starStepsHtml(book.rating);
+  html += '<p class="muted">' + ((book.rating === null || book.rating === undefined) ? "Not rated yet." : "My rating: " + formatRating(book.rating) + " out of 5.") + "</p></div></div>";
   if (book.google_rating !== null && book.google_rating !== undefined) {
     var g = formatRating(book.google_rating);
     if (book.ratings_count) g += " (" + Number(book.ratings_count).toLocaleString("en-US") + " ratings)";
-    html += metaRow("Google rating", g);
+    html += '<div class="detailsection" data-section="google">' + metaRow("Google rating", g) + "</div>";
   }
   var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
-  if (rel) html += metaRow("Release date", rel);
-  if (book.page_count) html += metaRow("Pages", String(book.page_count));
-  if (book.genres && book.genres.length) html += metaRow("Genres", book.genres.join(", "));
-  if (book.publisher) html += metaRow("Publisher", book.publisher);
+  if (rel) html += '<div class="detailsection" data-section="release">' + metaRow("Release date", rel) + "</div>";
+  if (book.page_count) html += '<div class="detailsection" data-section="pages">' + metaRow("Pages", String(book.page_count)) + "</div>";
+  if (book.genres && book.genres.length) html += '<div class="detailsection" data-section="genres">' + metaRow("Genres", book.genres.join(", ")) + "</div>";
+  if (book.publisher) html += '<div class="detailsection" data-section="publisher">' + metaRow("Publisher", book.publisher) + "</div>";
   var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
-  html += '<div><button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div>";
+  html += '<div class="detailsection" data-section="read"><div><button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div></div>";
   html += "</div>";
   html += "</div>";
+  html += '<div class="detailunder"></div>';
   if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
   html += '<div class="detailactions">';
   html += '<div class="inlinerow"><span class="fieldlabel inline">Reader</span><select id="detailReader" class="narrowselect">';
@@ -1415,6 +1466,9 @@ function renderDetail() {
   }
   html += "</div>";
   $("detailBody").innerHTML = html;
+  layoutDetail();
+  var coverImg = $("detailBody").querySelector(".detailcover");
+  if (coverImg && !coverImg.complete) coverImg.addEventListener("load", layoutDetail);
 }
 
 function saveTitleAuthor(book) {
