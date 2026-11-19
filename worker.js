@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v8";
+const CACHE = "bookshelf-v9";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -687,7 +687,7 @@ function pageHtml() {
   .viewrow { display: flex; gap: 8px; margin-bottom: 10px; }
   .spineshelf { margin: 18px 0 6px; }
   .plaque { display: block; width: fit-content; margin: 0 auto 8px; padding: 5px 18px; font-size: 15px; font-weight: 700; color: #3a2413; background: linear-gradient(#e8c96a, #c9a13a); border: 1px solid #8a6d1f; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.5); text-align: center; }
-  .spinebody { border: 1px solid #3a2413; background: #20150c; padding: 10px 8px 0; overflow: hidden; }
+  .spinebody { border: 1px solid #3a2413; background: #20150c; padding: 10px 0 0; overflow: hidden; }
   .spinerow { display: flex; gap: 2px; align-items: flex-end; }
   .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 3px 0; overflow: hidden; }
   .spinetext { writing-mode: vertical-rl; text-orientation: mixed; display: block; height: 100%; overflow: hidden; }
@@ -1185,18 +1185,19 @@ function spineLayoutFor(bodyW) {
   return { count: count, width: width };
 }
 
-// The layout for the shelf on this screen. The shelf body has 8px of
-// padding on each side, inside a wrap with 14px of padding on each
-// side. Without a measurable layout (for example in a test) the full
-// width desktop shelf is used.
+// The layout for the shelf on this screen. The shelf body has no
+// padding on its sides (10px on top only), inside a wrap with 14px of
+// padding on each side, so the spines run to the body's left and
+// right edges. Without a measurable layout (for example in a test)
+// the full width desktop shelf is used.
 function spineLayout() {
   var w = 0;
   var wrap = document.querySelector(".wrap");
   if (wrap && wrap.clientWidth) w = wrap.clientWidth - 28;
   else if (window.innerWidth) w = Math.min(window.innerWidth - 28, 692);
   if (!w || w < 100) w = 692;
-  var layout = spineLayoutFor(w - 16);
-  layout.bodyW = w - 16;
+  var layout = spineLayoutFor(w);
+  layout.bodyW = w;
   return layout;
 }
 
