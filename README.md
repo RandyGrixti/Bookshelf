@@ -7,15 +7,21 @@ lists, and a link to the file in Dropbox.
 
 ## Views
 
-Cover view shows the book covers in a grid. Spine view shows the books as
+Spine view is the default. It shows the books as
 shelves of spines, like books on a real shelf, with a brass plaque in the
-middle at the top of each shelf showing the first and last books on it. The
+middle at the top of each shelf showing the first and last books on it. Each
+spine shows the title and author on two lines. The
 plaque range follows the sort: letters for title, author and genre sorts,
 with two or three letters when the shelf boundary needs them, and the year
 range for release date and date added sorts. Tap a spine and the book slides
 out of the shelf and turns around to show its cover. Tap the cover to open
 the book's details. Tap anywhere else to put the book back on the shelf.
-The details dialog only closes with its Close button.
+The details dialog only closes with its Close button. Cover view shows the
+book covers in a grid. In a book's details, the cover sits on the left with
+the title, rating, Google rating, release date, pages, genres, publisher,
+and Read button beside it, in that order. The description comes right after
+the Read button, under the cover, then the Reader and List dropdowns and
+the Dropbox and source links.
 
 ## Files
 
@@ -79,7 +85,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v4`. When the app shell
+The service worker cache is named `bookshelf-v5`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v4`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v5`) and
 deploy. The new worker then clears the old cache on activation.

@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v4";
+const CACHE = "bookshelf-v5";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -691,8 +691,8 @@ function pageHtml() {
   .spinerow { display: flex; gap: 4px; align-items: flex-end; }
   .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 6px 0; overflow: hidden; }
   .spinetext { writing-mode: vertical-rl; text-orientation: mixed; display: block; height: 100%; overflow: hidden; }
-  .spinetitle { font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; }
-  .spineauthor { font-size: 11px; color: #e8d3ac; white-space: nowrap; margin-left: 3px; }
+  .spinetitle { display: block; font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; margin-left: 3px; }
+  .spineauthor { display: block; font-size: 11px; color: #e8d3ac; white-space: nowrap; }
   .spinecheck { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 16px; height: 16px; border-radius: 50%; background: rgba(36, 23, 8, .9); color: #8fce7a; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
   .flipoverlay { position: fixed; inset: 0; z-index: 38; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
   .flipoverlay[hidden] { display: none; }
@@ -719,7 +719,7 @@ function pageHtml() {
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.65); }
   .panel { position: relative; width: 100%; max-width: 640px; background: #241a10; border: 1px solid #4a3220; border-radius: 12px; padding: 16px; margin: auto 0; }
   .covercheck { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(36, 23, 8, .88); color: #8fce7a; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
-  .detailcover { width: 130px; border-radius: 8px; display: block; margin: 12px 0; }
+  .detailcover { width: 110px; border-radius: 8px; display: block; margin: 0; }
   .detailtitle { font-size: 22px; margin: 12px 0 4px; }
   .detailauthor { font-size: 16px; color: #c9b69a; margin: 0 0 12px; }
   .detailtitlewrap { display: flex; align-items: flex-start; gap: 10px; }
@@ -727,13 +727,16 @@ function pageHtml() {
   .detailtitlewrap .btn { flex: none; margin-top: 10px; }
   .editinput { width: 100%; box-sizing: border-box; margin: 6px 0; }
   .editbtns { display: flex; gap: 8px; margin: 8px 0 12px; }
+  .detailtop { display: flex; gap: 12px; align-items: flex-start; }
+  .detailcoverwrap { flex: none; }
+  .detailmain { flex: 1; min-width: 0; }
+  .detailmain .detailtitle { margin-top: 0; }
+  .detailmain .detailtitlewrap .btn { margin-top: 0; }
+  .detailmain .stars { font-size: 28px; }
   @media (min-width: 560px) {
-    .detailtop { display: flex; gap: 16px; align-items: flex-start; }
-    .detailcoverwrap { flex: none; }
-    .detailcover { width: 150px; margin: 0; }
-    .detailmain { flex: 1; min-width: 0; }
-    .detailmain .detailtitle { margin-top: 0; }
-    .detailmain .detailtitlewrap .btn { margin-top: 0; }
+    .detailtop { gap: 16px; }
+    .detailcover { width: 150px; }
+    .detailmain .stars { font-size: 34px; }
   }
   .desc { line-height: 1.5; }
   .detailtop + .desc { margin-top: 14px; }
@@ -742,8 +745,12 @@ function pageHtml() {
   select.narrowselect { width: auto; min-width: 110px; flex: none; }
   .linkrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .srclink { color: #d9a441; font-size: 15px; }
-  .metarow { display: flex; gap: 8px; margin: 6px 0; font-size: 15px; }
-  .metalabel { color: #c9b69a; flex: none; width: 110px; }
+  .metarow { display: block; margin: 8px 0; font-size: 15px; }
+  .metalabel { display: block; color: #c9b69a; font-size: 13px; margin-bottom: 1px; }
+  @media (min-width: 560px) {
+    .metarow { display: flex; gap: 8px; margin: 6px 0; }
+    .metalabel { flex: none; width: 110px; font-size: 15px; margin-bottom: 0; }
+  }
   .detailactions { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
   .fieldlabel { font-size: 14px; color: #c9b69a; margin-bottom: 4px; display: block; }
   .stars { position: relative; display: inline-block; font-size: 34px; line-height: 1; letter-spacing: 2px; }
@@ -776,8 +783,8 @@ function pageHtml() {
     </div>
   </div>
   <div class="viewrow">
-    <button type="button" class="btn" id="spineView">Spine</button>
-    <button type="button" class="btn active" id="coverView">Cover</button>
+    <button type="button" class="btn active" id="spineView">Spine</button>
+    <button type="button" class="btn" id="coverView">Cover</button>
   </div>
   <div class="searchrow">
     <input type="search" id="search" placeholder="Search title or author" aria-label="Search title or author">
@@ -854,11 +861,11 @@ function pageHtml() {
     <h2>About Bookshelf</h2>
     <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox.</p>
     <h3>Views</h3>
-    <p>Bookshelf has two views, Cover and Spine. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
+    <p>Bookshelf has two views, Spine and Cover. It opens on Spine view. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
     <h3>Shelves</h3>
     <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p>
     <h3>Spine view</h3>
-    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each shelf is packed full, and a brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, and a brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
     <h3>Sorting</h3>
     <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
     <h3>Search</h3>
@@ -868,7 +875,7 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details: cover, your rating, the Google rating when one is known, release date, pages, genres, and publisher, with the description below. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating, the Google rating when one is known, release date, pages, genres, publisher, and the Read button beside it, in that order. The description comes right after the Read button, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -900,7 +907,7 @@ var state = {
   reader: "All",
   genre: "",
   readFilter: "all",
-  view: "cover",
+  view: "spine",
   detailId: null
 };
 var listView = { selectedId: null, edit: false, picker: false, pickerQuery: "", renaming: false, confirmingDelete: false };
@@ -1375,9 +1382,12 @@ function renderDetail() {
   if (book.page_count) html += metaRow("Pages", String(book.page_count));
   if (book.genres && book.genres.length) html += metaRow("Genres", book.genres.join(", "));
   if (book.publisher) html += metaRow("Publisher", book.publisher);
-  html += '<div class="detailactions">';
   var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
   html += '<div><button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div>";
+  html += "</div>";
+  html += "</div>";
+  if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
+  html += '<div class="detailactions">';
   html += '<div class="inlinerow"><span class="fieldlabel inline">Reader</span><select id="detailReader" class="narrowselect">';
   ["Randy", "Lisa", "All"].forEach(function (r) {
     html += '<option value="' + r + '"' + (book.reader === r ? " selected" : "") + ">" + r + "</option>";
@@ -1404,9 +1414,6 @@ function renderDetail() {
     html += "</div>";
   }
   html += "</div>";
-  html += "</div>";
-  html += "</div>";
-  if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
   $("detailBody").innerHTML = html;
 }
 
