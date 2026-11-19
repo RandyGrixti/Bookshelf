@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v10";
+const CACHE = "bookshelf-v11";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -877,7 +877,7 @@ function pageHtml() {
     <h3>Search</h3>
     <p>The search box matches words in the title or the author name. Clear it to see all books again.</p>
     <h3>Filters</h3>
-    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box narrows the shelves to one genre. The Read box shows all books, only books marked Read, or only books not yet read.</p>
+    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 28 genres. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p>
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
@@ -968,6 +968,164 @@ function firstGenreOf(book) {
   return "";
 }
 
+// Randy's genre table: the 28 genres in the Filters popup, and the
+// subgenre each stored genre belongs to. A filter match is
+// hierarchical, not substring: Fiction matches Historical Fiction,
+// Classics and Magical Realism, but not Detective Fiction, which
+// belongs to Mystery & Crime.
+var GENRES = [
+  "Fiction",
+  "Mystery & Crime",
+  "Thriller & Suspense",
+  "Science Fiction",
+  "Fantasy",
+  "Horror",
+  "Romance",
+  "Action & Adventure",
+  "Western",
+  "Biography & Memoir",
+  "History",
+  "Politics & Society",
+  "Business & Economics",
+  "Self-Help & Personal Development",
+  "Psychology & Philosophy",
+  "Religion & Spirituality",
+  "Health & Wellness",
+  "Science & Nature",
+  "Travel & Geography",
+  "Food & Cooking",
+  "Arts & Culture",
+  "Sports & Recreation",
+  "Education & Reference",
+  "Family & Relationships",
+  "Poetry & Drama",
+  "Children's Books",
+  "Young Adult",
+  "Graphic Literature",
+];
+
+var SUBGENRE_PARENT = {
+  "adventure": "Action & Adventure",
+  "ancient history": "History",
+  "architecture and design": "Arts & Culture",
+  "art and photography": "Arts & Culture",
+  "astronomy": "Science & Nature",
+  "autobiography": "Biography & Memoir",
+  "biography": "Biography & Memoir",
+  "business": "Business & Economics",
+  "canadian history": "History",
+  "christianity": "Religion & Spirituality",
+  "classics": "Fiction",
+  "comics": "Graphic Literature",
+  "communication": "Self-Help & Personal Development",
+  "contemporary fiction": "Fiction",
+  "contemporary romance": "Romance",
+  "cookbooks": "Food & Cooking",
+  "cosmic horror": "Horror",
+  "cozy mystery": "Mystery & Crime",
+  "current affairs": "Politics & Society",
+  "cyberpunk": "Science Fiction",
+  "dark fantasy": "Fantasy",
+  "detective fiction": "Mystery & Crime",
+  "domestic thriller": "Thriller & Suspense",
+  "drama and plays": "Poetry & Drama",
+  "dystopian": "Science Fiction",
+  "early readers": "Children's Books",
+  "economics": "Business & Economics",
+  "education": "Education & Reference",
+  "environment and climate": "Science & Nature",
+  "epic fantasy": "Fantasy",
+  "espionage": "Thriller & Suspense",
+  "ethics": "Psychology & Philosophy",
+  "fairy tales and folklore": "Fantasy",
+  "film and television": "Arts & Culture",
+  "finance and investing": "Business & Economics",
+  "fitness": "Health & Wellness",
+  "food writing": "Food & Cooking",
+  "gothic horror": "Horror",
+  "graphic novels": "Graphic Literature",
+  "hard science fiction": "Science Fiction",
+  "hard-boiled": "Mystery & Crime",
+  "health": "Health & Wellness",
+  "high fantasy": "Fantasy",
+  "historical fiction": "Fiction",
+  "historical romance": "Romance",
+  "language and linguistics": "Education & Reference",
+  "leadership and management": "Business & Economics",
+  "legal thriller": "Mystery & Crime",
+  "literary fiction": "Fiction",
+  "magical realism": "Fiction",
+  "manga": "Graphic Literature",
+  "medical thriller": "Mystery & Crime",
+  "medieval history": "History",
+  "memoir": "Biography & Memoir",
+  "mental wellness": "Health & Wellness",
+  "middle grade": "Children's Books",
+  "military fiction": "Action & Adventure",
+  "military history": "History",
+  "modern history": "History",
+  "music": "Arts & Culture",
+  "nature and wildlife": "Science & Nature",
+  "outdoor recreation": "Sports & Recreation",
+  "paranormal romance": "Romance",
+  "parenting": "Family & Relationships",
+  "personal growth": "Self-Help & Personal Development",
+  "philosophy": "Psychology & Philosophy",
+  "picture books": "Children's Books",
+  "poetry": "Poetry & Drama",
+  "police procedural": "Mystery & Crime",
+  "political thriller": "Thriller & Suspense",
+  "politics and government": "Politics & Society",
+  "post-apocalyptic": "Science Fiction",
+  "productivity": "Self-Help & Personal Development",
+  "psychological horror": "Horror",
+  "psychological thriller": "Thriller & Suspense",
+  "psychology": "Psychology & Philosophy",
+  "reference": "Education & Reference",
+  "relationships": "Family & Relationships",
+  "religion": "Religion & Spirituality",
+  "romantic comedy": "Romance",
+  "romantic suspense": "Romance",
+  "science": "Science & Nature",
+  "self-help": "Self-Help & Personal Development",
+  "short stories": "Fiction",
+  "social issues": "Politics & Society",
+  "sociology": "Politics & Society",
+  "space opera": "Science Fiction",
+  "spirituality": "Religion & Spirituality",
+  "sports": "Sports & Recreation",
+  "supernatural horror": "Horror",
+  "survival": "Action & Adventure",
+  "suspense": "Thriller & Suspense",
+  "sword and sorcery": "Fantasy",
+  "technology": "Science & Nature",
+  "time travel": "Science Fiction",
+  "travel": "Travel & Geography",
+  "travel memoir": "Travel & Geography",
+  "true crime": "Mystery & Crime",
+  "urban fantasy": "Fantasy",
+  "western fiction": "Western",
+  "ya contemporary": "Young Adult",
+  "ya fantasy": "Young Adult",
+  "ya romance": "Young Adult",
+  "ya science fiction": "Young Adult",
+};
+
+function normGenre(s) {
+  return String(s || "").toLowerCase().replace(/&/g, "and").replace(/'/g, "").replace(/\\s+/g, " ").trim();
+}
+
+function genreMatches(book, filter) {
+  var f = normGenre(filter);
+  var genres = book.genres || [];
+  for (var i = 0; i < genres.length; i++) {
+    var g = normGenre(genres[i]);
+    if (g === f) return true;
+    if (SUBGENRE_PARENT[g] && normGenre(SUBGENRE_PARENT[g]) === f) return true;
+  }
+  return false;
+}
+
 function releaseKeyOf(book) {
   var d = String(book.published_date || "").trim();
   if (d) return d;
@@ -1054,22 +1212,11 @@ function filteredBooks() {
     }
     if (state.reader === "Randy" && book.reader !== "Randy" && book.reader !== "All") return false;
     if (state.reader === "Lisa" && book.reader !== "Lisa" && book.reader !== "All") return false;
-    if (state.genre) {
-      var genres = book.genres || [];
-      if (genres.indexOf(state.genre) === -1) return false;
-    }
+    if (state.genre && !genreMatches(book, state.genre)) return false;
     if (state.readFilter === "read" && !book.is_read) return false;
     if (state.readFilter === "unread" && book.is_read) return false;
     return true;
   });
-}
-
-function allGenres() {
-  var seen = {};
-  state.books.forEach(function (book) {
-    (book.genres || []).forEach(function (g) { seen[String(g)] = true; });
-  });
-  return Object.keys(seen).sort(function (a, b) { return cmpText(a, b); });
 }
 
 function bookById(id) {
@@ -1114,7 +1261,7 @@ function refreshData() {
     if (!data) return;
     state.books = data.books || [];
     state.lists = data.lists || [];
-    if (state.genre && allGenres().indexOf(state.genre) === -1) state.genre = "";
+    if (state.genre && GENRES.indexOf(state.genre) === -1) state.genre = "";
     render();
     if (state.detailId !== null) renderDetail();
     if (!$("listsOverlay").hidden) renderLists();
@@ -1125,7 +1272,7 @@ function renderGenreOptions() {
   var sel = $("genreSel");
   var current = state.genre;
   var html = '<option value="">All genres</option>';
-  allGenres().forEach(function (g) {
+  GENRES.forEach(function (g) {
     html += '<option value="' + esc(g) + '"' + (g === current ? " selected" : "") + ">" + esc(g) + "</option>";
   });
   sel.innerHTML = html;

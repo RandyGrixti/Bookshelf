@@ -88,7 +88,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v10`. When the app shell
+The service worker cache is named `bookshelf-v11`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v10`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v11`) and
 deploy. The new worker then clears the old cache on activation.
