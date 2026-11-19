@@ -569,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v6";
+const CACHE = "bookshelf-v7";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1338,8 +1338,9 @@ function starStepsHtml(rating) {
 function openDetail(id) {
   state.detailId = id;
   detailEditing = false;
-  renderDetail();
   $("detailOverlay").hidden = false;
+  renderDetail();
+  if (window.requestAnimationFrame) window.requestAnimationFrame(layoutDetail);
 }
 
 function closeDetail() {
@@ -1368,8 +1369,11 @@ function splitDetailSections(coverHeight, sectionHeights) {
 // Move detail sections between the column beside the cover and the
 // full-width area below it, using real rendered heights. Sections are
 // measured back in the narrow column first, so the split follows the
-// sizes on this screen. Runs after every detail render, which includes
-// resize, and again when the cover image finishes loading.
+// sizes on this screen. Runs after every detail render, again once the
+// dialog is visible, again when the cover image finishes loading, and
+// on resize while the dialog is open. It must only run while the
+// dialog is visible: hidden, every height reads as zero and every
+// section stays beside the cover.
 function layoutDetail() {
   var body = $("detailBody");
   if (!body) return;
@@ -1748,9 +1752,11 @@ $("spineView").addEventListener("click", function () { setView("spine"); });
 
 var resizeTimer = null;
 window.addEventListener("resize", function () {
-  if (state.view !== "spine") return;
   if (resizeTimer) clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(render, 150);
+  resizeTimer = setTimeout(function () {
+    if (state.view === "spine") render();
+    if (state.detailId !== null && !$("detailOverlay").hidden) layoutDetail();
+  }, 150);
 });
 
 // The flip: tapping a spine slides the book out of the shelf and
