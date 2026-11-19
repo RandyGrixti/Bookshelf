@@ -2,7 +2,7 @@
 
 Bookshelf is the private book collection app for Randy and Lisa. It shows
 every book that has been loaded into the collection, grouped into shelves,
-with cover and list views, star ratings, read marks, reader labels, custom
+with cover view, star ratings, read marks, reader labels, custom
 lists, and a link to the file in Dropbox.
 
 ## Files
@@ -25,7 +25,9 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
   rating, genres and formats (JSON arrays stored as text), cover URL,
   description, page count, publisher, published date, Google rating and
   ratings count, ISBN, language, info link, Dropbox path, filename,
-  format, and added/created/updated timestamps.
+  Dropbox file id (`dropbox_id`), enrichment source (`enriched`:
+  `openlibrary`, `watchlist`, or empty), format, and added/created/updated
+  timestamps.
 - `lists`: named custom lists.
 - `list_items`: which books sit in which list, and in what order
   (`position`).
@@ -57,11 +59,15 @@ The detail view shows an Open in Dropbox link when a book has a
 segment URL-encoded. For example, a path of `/books/Randy/My Book.epub`
 becomes `https://www.dropbox.com/preview/books/Randy/My%20Book.epub`.
 The link opens in a new tab. When a book has no Dropbox path, no link
-is shown.
+is shown. Next to the Dropbox button the details also show a link to
+the site the book's details came from when that is known: Open Library
+for books enriched from Open Library, Google Books for the few that
+came from the Watch List. The link is a search for the book's title
+and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v2`. When the app shell
+The service worker cache is named `bookshelf-v3`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v2`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v3`) and
 deploy. The new worker then clears the old cache on activation.

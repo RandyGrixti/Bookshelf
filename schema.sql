@@ -1,5 +1,6 @@
 -- Bookshelf schema record
 -- Applied via d1_bookshelf.py apply-0001 on Nov 18, 2026.
+-- dropbox_id and enriched arrive with migration 0003
 -- This file is a copy of ~/workspace/bookshelf-build/migrations/0001_init.sql,
 -- kept here as the record of the live schema.
 
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS books (
   info_link TEXT NOT NULL DEFAULT '',
   dropbox_path TEXT NOT NULL DEFAULT '',
   filename TEXT NOT NULL DEFAULT '',
+  dropbox_id TEXT NOT NULL DEFAULT '',
+  enriched TEXT NOT NULL DEFAULT '',
   format TEXT NOT NULL DEFAULT '',
   formats TEXT NOT NULL DEFAULT '',
   added_at TEXT NOT NULL DEFAULT '',

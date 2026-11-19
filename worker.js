@@ -287,6 +287,7 @@ async function handleList(env) {
   const books = (bookRes.results || []).map(function (row) {
     row.genres = parseJsonArray(row.genres);
     row.formats = parseJsonArray(row.formats);
+    row.enriched = row.enriched || "";
     return row;
   });
   const listRes = await env.DB.prepare(
@@ -568,7 +569,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v2";
+const CACHE = "bookshelf-v3";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -653,11 +654,13 @@ function pageHtml() {
   .btn:disabled { opacity: .55; cursor: default; }
   .btn.small { padding: 6px 10px; font-size: 14px; }
   a.btn { display: inline-block; text-decoration: none; text-align: center; }
-  .segbar { display: flex; background: #241a10; border: 1px solid #4a3220; border-radius: 10px; padding: 3px; margin: 6px 0 10px; }
-  .segbtn { flex: 1; padding: 8px 4px; border: 0; border-radius: 8px; background: transparent; color: #c9b69a; font-size: 15px; font-weight: 600; }
-  .segbtn.active { background: #d9a441; color: #241708; }
   input[type="search"], input[type="text"], select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #4a3220; background: #241a10; color: #f2e8d5; font-size: 16px; }
   input[type="search"] { margin-bottom: 10px; }
+  .searchrow { display: flex; gap: 8px; margin-bottom: 10px; }
+  .searchrow input[type="search"] { flex: 1; min-width: 0; margin-bottom: 0; }
+  .searchrow .btn { flex: none; }
+  .filterspanel { border: 1px solid #4a3220; border-radius: 10px; background: #241a10; padding: 12px; margin-bottom: 10px; }
+  .filterspanel[hidden] { display: none; }
   .ctrlrow { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
   .ctrlrow label { flex: 1; display: block; font-size: 14px; color: #c9b69a; min-width: 0; }
   .ctrlrow label select { margin-top: 4px; }
@@ -675,11 +678,11 @@ function pageHtml() {
   .shelfhead .count { font-weight: 400; color: #e8d3ac; font-size: 14px; }
   .shelfbody { border: 1px solid #3a2413; border-top: 0; background: #20150c; padding: 8px; }
   .shelfboard { height: 10px; background: linear-gradient(#8a5f36, #5a3a20); border: 1px solid #3a2413; border-top: 0; border-radius: 0 0 6px 6px; box-shadow: 0 4px 8px rgba(0,0,0,.45); }
-  .row { display: block; width: 100%; text-align: left; padding: 11px 10px; background: transparent; border: 0; border-bottom: 1px solid #33220f; color: #f2e8d5; position: relative; }
-  .row:last-child { border-bottom: 0; }
-  .rowtitle { display: block; font-size: 16px; font-weight: 600; padding-right: 28px; }
-  .rowauthor { display: block; font-size: 14px; color: #c9b69a; padding-right: 28px; }
-  .readmark { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #8fce7a; font-size: 18px; font-weight: 700; }
+  .jumpto { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+  .jumpbtn { min-width: 28px; padding: 5px 6px; border-radius: 6px; border: 1px solid #4a3220; background: #241a10; color: #f2e8d5; font-size: 14px; font-weight: 600; }
+  .jumpbtn:disabled { opacity: .35; cursor: default; }
+  .topbtn { position: fixed; right: 14px; bottom: 16px; z-index: 20; padding: 10px 14px; border-radius: 999px; border: 1px solid #d9a441; background: #d9a441; color: #241708; font-size: 15px; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+  .topbtn[hidden] { display: none; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
   .coverbox { padding: 0; border: 1px solid #3a2413; border-radius: 6px; overflow: hidden; background: #2b1d12; aspect-ratio: 2 / 3; position: relative; display: block; width: 100%; }
   .coverbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -710,6 +713,12 @@ function pageHtml() {
     .detailmain .detailtitlewrap .btn { margin-top: 0; }
   }
   .desc { line-height: 1.5; }
+  .detailtop + .desc { margin-top: 14px; }
+  .inlinerow { display: flex; align-items: center; gap: 8px; }
+  .fieldlabel.inline { margin-bottom: 0; flex: none; }
+  select.narrowselect { width: auto; min-width: 110px; flex: none; }
+  .linkrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .srclink { color: #d9a441; font-size: 15px; }
   .metarow { display: flex; gap: 8px; margin: 6px 0; font-size: 15px; }
   .metalabel { color: #c9b69a; flex: none; width: 110px; }
   .detailactions { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -743,40 +752,42 @@ function pageHtml() {
       <button type="button" class="btn" id="aboutBtn">About</button>
     </div>
   </div>
-  <div class="segbar" role="group" aria-label="View">
-    <button type="button" class="segbtn" id="viewList">List</button>
-    <button type="button" class="segbtn active" id="viewCover">Cover</button>
+  <div class="searchrow">
+    <input type="search" id="search" placeholder="Search title or author" aria-label="Search title or author">
+    <button type="button" class="btn" id="filtersBtn" aria-expanded="false">Filters</button>
   </div>
-  <input type="search" id="search" placeholder="Search title or author" aria-label="Search title or author">
-  <div class="ctrlrow">
-    <label>Sort
-      <select id="sortSel">
-        <option value="title">Title</option>
-        <option value="author-last">Author (last name)</option>
-        <option value="author-first">Author (first name)</option>
-        <option value="genre">Genre</option>
-        <option value="release">Release date</option>
-        <option value="added">Date added</option>
-      </select>
-    </label>
-    <button type="button" class="btn" id="dirBtn">Ascending</button>
-  </div>
-  <div class="chips" role="group" aria-label="Reader filter">
-    <button type="button" class="chip active" data-reader="All">All</button>
-    <button type="button" class="chip" data-reader="Randy">Randy</button>
-    <button type="button" class="chip" data-reader="Lisa">Lisa</button>
-  </div>
-  <div class="ctrlrow">
-    <label>Genre
-      <select id="genreSel"><option value="">All genres</option></select>
-    </label>
-    <label>Read
-      <select id="readSel">
-        <option value="all">All</option>
-        <option value="read">Read</option>
-        <option value="unread">Unread</option>
-      </select>
-    </label>
+  <div id="filtersPanel" class="filterspanel" hidden>
+    <div class="ctrlrow">
+      <label>Sort
+        <select id="sortSel">
+          <option value="title">Title</option>
+          <option value="author-last">Author (last name)</option>
+          <option value="author-first">Author (first name)</option>
+          <option value="genre">Genre</option>
+          <option value="release">Release date</option>
+          <option value="added">Date added</option>
+        </select>
+      </label>
+      <button type="button" class="btn" id="dirBtn">Ascending</button>
+    </div>
+    <div class="chips" role="group" aria-label="Reader filter">
+      <button type="button" class="chip active" data-reader="All">All</button>
+      <button type="button" class="chip" data-reader="Randy">Randy</button>
+      <button type="button" class="chip" data-reader="Lisa">Lisa</button>
+    </div>
+    <div class="ctrlrow">
+      <label>Genre
+        <select id="genreSel"><option value="">All genres</option></select>
+      </label>
+      <label>Read
+        <select id="readSel">
+          <option value="all">All</option>
+          <option value="read">Read</option>
+          <option value="unread">Unread</option>
+        </select>
+      </label>
+    </div>
+    <button type="button" class="btn" id="filtersClose">Close</button>
   </div>
   <p id="countLine" class="muted"></p>
 </header>
@@ -788,9 +799,12 @@ function pageHtml() {
     <button type="button" class="btn primary" id="retryBtn">Try again</button>
   </div>
   <div id="empty" hidden><p class="muted">No books match your search or filters.</p></div>
+  <div id="jumpto" class="jumpto" role="group" aria-label="Jump to"></div>
   <div id="shelves"></div>
 </main>
 </div>
+
+<button type="button" id="topBtn" class="topbtn" hidden>Back to top</button>
 
 <div id="detailOverlay" class="overlay" hidden>
   <div class="backdrop"></div>
@@ -813,27 +827,29 @@ function pageHtml() {
     <h2>About Bookshelf</h2>
     <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox.</p>
     <h3>Views</h3>
-    <p>Bookshelf opens on the Cover view, showing the book covers in a grid. Use the List and Cover buttons at the top to switch views. List shows each book as a row with its title and author. Cover shows the book covers in a grid. A book with no cover shows its title and author inside its box instead.</p>
+    <p>Bookshelf shows the book covers in a grid. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
     <h3>Shelves</h3>
-    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick.</p>
+    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title.</p>
     <h3>Sorting</h3>
-    <p>The Sort box offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
+    <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
     <h3>Search</h3>
     <p>The search box matches words in the title or the author name. Clear it to see all books again.</p>
     <h3>Filters</h3>
-    <p>The All, Randy, and Lisa buttons filter by reader. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box narrows the shelves to one genre. The Read box shows all books, only books marked Read, or only books not yet read.</p>
+    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box narrows the shelves to one genre. The Read box shows all books, only books marked Read, or only books not yet read.</p>
+    <h3>Jump to and back to top</h3>
+    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details: cover, description, pages, publisher, release date, genres, and the Google rating when one is known. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details: cover, your rating, the Google rating when one is known, release date, pages, genres, and publisher, with the description below. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
-    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap Clear to remove your rating. Your rating is separate from the Google rating.</p>
+    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
-    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows beside read books in List view and as a small badge on the cover in Cover view. Tap the button again to clear the mark.</p>
+    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover. Tap the button again to clear the mark.</p>
     <h3>Reader field</h3>
-    <p>The Reader box in the details says who the book is for: Randy, Lisa, or All. Change it and it saves at once.</p>
+    <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once.</p>
     <h3>Lists</h3>
-    <p>The Lists button opens your own lists. Create a list with a name, then open it and use Add books to search the shelves and add books to it. In Edit mode you can move books up or down and remove them. Rename changes the name. Delete removes the list, not the books. A book can sit in as many lists as you like.</p>
+    <p>The Lists button opens your own lists. Create a list with a name, then open it and use Add books to search the shelves and add books to it. In Edit mode you can move books up or down and remove them. Rename changes the name. Delete removes the list, not the books. A book can sit in as many lists as you like. In a book's details, pick a list from the List dropdown and tap + to add the book to it.</p>
     <h3>Dropbox links</h3>
-    <p>When a book has a file in Dropbox, its details show an Open in Dropbox link. It opens the file in a new tab so you can read or download it.</p>
+    <p>When a book has a file in Dropbox, its details show a small Open in Dropbox button. Next to it is a link to Open Library or Google Books, whichever the book's details came from. The Dropbox link opens the file in a new tab so you can read or download it.</p>
     <h3>Passcode</h3>
     <p>Bookshelf asks for a passcode the first time you visit on a device. Once you enter it, the device is remembered for a year, so you only enter it once per device.</p>
     <h3>Installing the app on a phone</h3>
@@ -845,7 +861,6 @@ function pageHtml() {
 var state = {
   books: [],
   lists: [],
-  view: "cover",
   search: "",
   sort: "title",
   dir: "asc",
@@ -877,6 +892,16 @@ function dropboxUrl(path) {
   var parts = String(path).split("/").filter(function (p) { return p.length > 0; });
   if (!parts.length) return "";
   return "https://www.dropbox.com/preview/" + parts.map(function (p) { return encodeURIComponent(p); }).join("/");
+}
+
+// Link to the site the book's details came from, when that is known:
+// Open Library for books enriched there, Google Books for the few
+// that came from the Watch List. Anything else has no source link.
+function sourceLink(book) {
+  var q = encodeURIComponent(((book.title || "") + " " + (book.author || "")).trim());
+  if (book.enriched === "openlibrary") return { label: "Open Library", url: "https://openlibrary.org/search?q=" + q };
+  if (book.enriched === "watchlist") return { label: "Google Books", url: "https://books.google.com/books?q=" + q };
+  return null;
 }
 
 function sortTitleOf(book) {
@@ -947,8 +972,11 @@ function sortBooks(list) {
 
 function groupLabelOf(book) {
   if (state.sort === "author-last" || state.sort === "author-first") {
-    var a = String(book.author || "").trim();
-    return a || "No author";
+    var key = sortKeyOf(book);
+    if (!key) return "No author";
+    var ch = key.charAt(0).toUpperCase();
+    if (ch < "A" || ch > "Z") return "#";
+    return ch;
   }
   if (state.sort === "genre") return firstGenreOf(book) || "No genre";
   if (state.sort === "release") return releaseYearOf(book) || "No date";
@@ -1056,15 +1084,6 @@ function renderGenreOptions() {
   sel.innerHTML = html;
 }
 
-function rowHtml(book) {
-  var html = '<button type="button" class="row" data-book-id="' + book.id + '">';
-  html += '<span class="rowtitle">' + esc(book.title) + "</span>";
-  html += '<span class="rowauthor">' + esc(book.author || "") + "</span>";
-  if (book.is_read) html += '<span class="readmark" aria-label="Read">&#10003;</span>';
-  html += "</button>";
-  return html;
-}
-
 function coverBoxHtml(book) {
   var cover = safeCover(book.cover_url);
   var html = '<button type="button" class="coverbox" data-book-id="' + book.id + '" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
@@ -1076,6 +1095,22 @@ function coverBoxHtml(book) {
   if (book.is_read) html += '<span class="covercheck" aria-label="Read">&#10003;</span>';
   html += "</button>";
   return html;
+}
+
+function jumpLetterOf(label) {
+  var ch = String(label || "").trim().charAt(0).toUpperCase();
+  if (ch >= "A" && ch <= "Z") return ch;
+  return "#";
+}
+
+function renderJumpTo(groups) {
+  var present = {};
+  groups.forEach(function (g) { present[jumpLetterOf(g.label)] = true; });
+  var html = "";
+  "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(function (letter) {
+    html += '<button type="button" class="jumpbtn" data-jump="' + letter + '"' + (present[letter] ? "" : " disabled") + ">" + letter + "</button>";
+  });
+  $("jumpto").innerHTML = html;
 }
 
 function render() {
@@ -1090,17 +1125,14 @@ function render() {
     $("countLine").textContent = "Showing " + filtered.length + " of " + total + " books.";
   }
   $("empty").hidden = filtered.length !== 0;
+  renderJumpTo(groups);
   var html = "";
   groups.forEach(function (group) {
     html += '<section class="shelf"><h2 class="shelfhead">' + esc(group.label) + ' <span class="count">(' + group.books.length + ")</span></h2>";
     html += '<div class="shelfbody">';
-    if (state.view === "cover") {
-      html += '<div class="grid">';
-      group.books.forEach(function (book) { html += coverBoxHtml(book); });
-      html += "</div>";
-    } else {
-      group.books.forEach(function (book) { html += rowHtml(book); });
-    }
+    html += '<div class="grid">';
+    group.books.forEach(function (book) { html += coverBoxHtml(book); });
+    html += "</div>";
     html += "</div>";
     html += '<div class="shelfboard"></div></section>';
   });
@@ -1120,7 +1152,7 @@ function metaRow(label, value) {
 
 function starStepsHtml(rating) {
   var pct = rating ? (rating / 5 * 100) : 0;
-  var html = '<div class="stars" role="group" aria-label="Your star rating">';
+  var html = '<div class="stars" role="group" aria-label="My rating">';
   html += '<span class="starbg" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span>';
   html += '<span class="starfg" style="width: ' + pct + '%" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span>';
   html += '<span class="starbtns">';
@@ -1170,45 +1202,50 @@ function renderDetail() {
     html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div>';
     html += '<p class="detailauthor">' + esc(book.author || "") + "</p>";
   }
-  if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
-  if (book.page_count) html += metaRow("Pages", String(book.page_count));
-  if (book.publisher) html += metaRow("Publisher", book.publisher);
-  var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
-  if (rel) html += metaRow("Release date", rel);
-  if (book.genres && book.genres.length) html += metaRow("Genres", book.genres.join(", "));
+  html += '<div><span class="fieldlabel">My rating</span>' + starStepsHtml(book.rating);
+  html += '<p class="muted">' + ((book.rating === null || book.rating === undefined) ? "Not rated yet." : "My rating: " + formatRating(book.rating) + " out of 5.") + "</p></div>";
   if (book.google_rating !== null && book.google_rating !== undefined) {
     var g = formatRating(book.google_rating);
     if (book.ratings_count) g += " (" + Number(book.ratings_count).toLocaleString("en-US") + " ratings)";
     html += metaRow("Google rating", g);
   }
+  var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
+  if (rel) html += metaRow("Release date", rel);
+  if (book.page_count) html += metaRow("Pages", String(book.page_count));
+  if (book.genres && book.genres.length) html += metaRow("Genres", book.genres.join(", "));
+  if (book.publisher) html += metaRow("Publisher", book.publisher);
   html += '<div class="detailactions">';
-  html += '<div><span class="fieldlabel">Your star rating</span>' + starStepsHtml(book.rating);
-  html += '<p class="muted">' + ((book.rating === null || book.rating === undefined) ? "Not rated yet." : "Your rating: " + formatRating(book.rating) + " out of 5.") + "</p>";
-  html += '<button type="button" class="btn small" data-action="clear-rating"' + ((book.rating === null || book.rating === undefined) ? " disabled" : "") + ">Clear</button></div>";
   var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
   html += '<div><button type="button" class="btn' + (book.is_read ? " primary" : "") + '" data-action="toggle-read" aria-pressed="' + (book.is_read ? "true" : "false") + '">' + esc(readLabel) + "</button></div>";
-  html += '<div><label class="fieldlabel" for="detailReader">Reader</label><select id="detailReader">';
+  html += '<div class="inlinerow"><span class="fieldlabel inline">Reader</span><select id="detailReader" class="narrowselect">';
   ["Randy", "Lisa", "All"].forEach(function (r) {
     html += '<option value="' + r + '"' + (book.reader === r ? " selected" : "") + ">" + r + "</option>";
   });
   html += "</select></div>";
-  html += '<div><span class="fieldlabel">Add to list</span>';
+  html += '<div class="inlinerow"><span class="fieldlabel inline">List</span>';
   if (state.lists.length) {
-    html += '<select id="detailListSel" aria-label="Choose a list">';
+    html += '<select id="detailListSel" class="narrowselect" aria-label="Choose a list">';
     state.lists.forEach(function (l) { html += '<option value="' + l.id + '">' + esc(l.name) + "</option>"; });
     html += "</select>";
-    html += '<button type="button" class="btn" data-action="add-to-list">Add</button>';
+    html += '<button type="button" class="btn small" data-action="add-to-list" aria-label="Add to list">+</button>';
   } else {
-    html += '<select disabled aria-label="Choose a list"><option>No lists yet</option></select>';
-    html += '<button type="button" class="btn" disabled>Add</button>';
-    html += '<p class="muted">No lists yet. Create one from the Lists view first.</p>';
+    html += '<select disabled class="narrowselect" aria-label="Choose a list"><option>No lists yet</option></select>';
+    html += '<button type="button" class="btn small" disabled aria-label="Add to list">+</button>';
   }
   html += "</div>";
+  if (!state.lists.length) html += '<p class="muted">No lists yet. Create one from the Lists view first.</p>';
   var db = dropboxUrl(book.dropbox_path);
-  if (db) html += '<div><a class="btn" href="' + esc(db) + '" target="_blank" rel="noopener noreferrer">Open in Dropbox</a></div>';
+  var src = sourceLink(book);
+  if (db || src) {
+    html += '<div class="linkrow">';
+    if (db) html += '<a class="btn small" href="' + esc(db) + '" target="_blank" rel="noopener noreferrer">Open in Dropbox</a>';
+    if (src) html += '<a class="srclink" href="' + esc(src.url) + '" target="_blank" rel="noopener noreferrer">' + esc(src.label) + "</a>";
+    html += "</div>";
+  }
   html += "</div>";
   html += "</div>";
   html += "</div>";
+  if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
   $("detailBody").innerHTML = html;
 }
 
@@ -1413,15 +1450,43 @@ function addToList(list, bookId) {
 
 // ---- Wiring ----
 
-$("viewList").addEventListener("click", function () { setView("list"); });
-$("viewCover").addEventListener("click", function () { setView("cover"); });
-
-function setView(v) {
-  state.view = v;
-  $("viewList").classList.toggle("active", v === "list");
-  $("viewCover").classList.toggle("active", v === "cover");
-  render();
+function setFiltersOpen(open) {
+  $("filtersPanel").hidden = !open;
+  $("filtersBtn").setAttribute("aria-expanded", open ? "true" : "false");
 }
+$("filtersBtn").addEventListener("click", function (e) {
+  e.stopPropagation();
+  setFiltersOpen($("filtersPanel").hidden);
+});
+$("filtersClose").addEventListener("click", function () { setFiltersOpen(false); });
+document.addEventListener("click", function (e) {
+  var panel = $("filtersPanel");
+  if (!panel || panel.hidden) return;
+  if (panel.contains(e.target) || e.target === $("filtersBtn")) return;
+  setFiltersOpen(false);
+});
+
+$("jumpto").addEventListener("click", function (e) {
+  var t = e.target.closest("[data-jump]");
+  if (!t || t.disabled) return;
+  var letter = t.getAttribute("data-jump");
+  var heads = document.querySelectorAll(".shelfhead");
+  for (var i = 0; i < heads.length; i++) {
+    var first = heads[i].textContent.trim().charAt(0).toUpperCase();
+    var match = letter === "#" ? (first < "A" || first > "Z") : (first === letter);
+    if (match) {
+      if (heads[i].scrollIntoView) heads[i].scrollIntoView();
+      return;
+    }
+  }
+});
+
+function updateTopBtn() {
+  var y = window.scrollY || document.documentElement.scrollTop || 0;
+  $("topBtn").hidden = y <= 400;
+}
+window.addEventListener("scroll", updateTopBtn);
+$("topBtn").addEventListener("click", function () { window.scrollTo({ top: 0, behavior: "smooth" }); });
 
 $("search").addEventListener("input", function (e) { state.search = e.target.value; render(); });
 $("sortSel").addEventListener("change", function (e) { state.sort = e.target.value; render(); });
@@ -1452,8 +1517,11 @@ $("detailBody").addEventListener("click", function (e) {
   var book = bookById(state.detailId);
   if (!book) return;
   if (action === "close-detail") closeDetail();
-  else if (action === "set-rating") saveRating(book, parseFloat(t.getAttribute("data-rating")));
-  else if (action === "clear-rating") saveRating(book, null);
+  else if (action === "set-rating") {
+    var v = parseFloat(t.getAttribute("data-rating"));
+    if (v === 0.5 && book.rating === 0.5) saveRating(book, null);
+    else saveRating(book, v);
+  }
   else if (action === "toggle-read") saveRead(book, !book.is_read);
   else if (action === "add-to-list") addDetailToList(book);
   else if (action === "edit-title-author") {
@@ -1550,6 +1618,7 @@ document.addEventListener("keydown", function (e) {
   if (!$("detailOverlay").hidden) closeDetail();
   else if (!$("listsOverlay").hidden) closeLists();
   else if (!$("aboutOverlay").hidden) $("aboutOverlay").hidden = true;
+  else if (!$("filtersPanel").hidden) setFiltersOpen(false);
 });
 
 function loadList() {
