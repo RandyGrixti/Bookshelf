@@ -278,6 +278,148 @@ function standardizedFilename(title, author, filename) {
   return base + ext;
 }
 
+// Genre table, both columns, for server-side validation of
+// hand-edited genres: normalized spelling to the table's spelling.
+// The same table lives in enrich_books.py; keep the two in step.
+var GENRE_CANONICAL = {
+  "action and adventure": "Action & Adventure",
+  "adventure": "Adventure",
+  "ancient history": "Ancient History",
+  "architecture and design": "Architecture & Design",
+  "art and photography": "Art & Photography",
+  "arts and culture": "Arts & Culture",
+  "astronomy": "Astronomy",
+  "autobiography": "Autobiography",
+  "biography": "Biography",
+  "biography and memoir": "Biography & Memoir",
+  "business": "Business",
+  "business and economics": "Business & Economics",
+  "canadian history": "Canadian History",
+  "childrens books": "Children's Books",
+  "christianity": "Christianity",
+  "classics": "Classics",
+  "comics": "Comics",
+  "communication": "Communication",
+  "contemporary fiction": "Contemporary Fiction",
+  "contemporary romance": "Contemporary Romance",
+  "cookbooks": "Cookbooks",
+  "cosmic horror": "Cosmic Horror",
+  "cozy mystery": "Cozy Mystery",
+  "current affairs": "Current Affairs",
+  "cyberpunk": "Cyberpunk",
+  "dark fantasy": "Dark Fantasy",
+  "detective fiction": "Detective Fiction",
+  "domestic thriller": "Domestic Thriller",
+  "drama and plays": "Drama & Plays",
+  "dystopian": "Dystopian",
+  "early readers": "Early Readers",
+  "economics": "Economics",
+  "education": "Education",
+  "education and reference": "Education & Reference",
+  "environment and climate": "Environment & Climate",
+  "epic fantasy": "Epic Fantasy",
+  "espionage": "Espionage",
+  "ethics": "Ethics",
+  "fairy tales and folklore": "Fairy Tales & Folklore",
+  "family and relationships": "Family & Relationships",
+  "fantasy": "Fantasy",
+  "fiction": "Fiction",
+  "film and television": "Film & Television",
+  "finance and investing": "Finance & Investing",
+  "fitness": "Fitness",
+  "food and cooking": "Food & Cooking",
+  "food writing": "Food Writing",
+  "gothic horror": "Gothic Horror",
+  "graphic literature": "Graphic Literature",
+  "graphic novels": "Graphic Novels",
+  "hard science fiction": "Hard Science Fiction",
+  "hard-boiled": "Hard-Boiled",
+  "health": "Health",
+  "health and wellness": "Health & Wellness",
+  "high fantasy": "High Fantasy",
+  "historical fiction": "Historical Fiction",
+  "historical romance": "Historical Romance",
+  "history": "History",
+  "horror": "Horror",
+  "language and linguistics": "Language & Linguistics",
+  "leadership and management": "Leadership & Management",
+  "legal thriller": "Legal Thriller",
+  "literary fiction": "Literary Fiction",
+  "magical realism": "Magical Realism",
+  "manga": "Manga",
+  "medical thriller": "Medical Thriller",
+  "medieval history": "Medieval History",
+  "memoir": "Memoir",
+  "mental wellness": "Mental Wellness",
+  "middle grade": "Middle Grade",
+  "military fiction": "Military Fiction",
+  "military history": "Military History",
+  "modern history": "Modern History",
+  "music": "Music",
+  "mystery and crime": "Mystery & Crime",
+  "nature and wildlife": "Nature & Wildlife",
+  "outdoor recreation": "Outdoor Recreation",
+  "paranormal romance": "Paranormal Romance",
+  "parenting": "Parenting",
+  "personal growth": "Personal Growth",
+  "philosophy": "Philosophy",
+  "picture books": "Picture Books",
+  "poetry": "Poetry",
+  "poetry and drama": "Poetry & Drama",
+  "police procedural": "Police Procedural",
+  "political thriller": "Political Thriller",
+  "politics and government": "Politics & Government",
+  "politics and society": "Politics & Society",
+  "post-apocalyptic": "Post-Apocalyptic",
+  "productivity": "Productivity",
+  "psychological horror": "Psychological Horror",
+  "psychological thriller": "Psychological Thriller",
+  "psychology": "Psychology",
+  "psychology and philosophy": "Psychology & Philosophy",
+  "reference": "Reference",
+  "relationships": "Relationships",
+  "religion": "Religion",
+  "religion and spirituality": "Religion & Spirituality",
+  "romance": "Romance",
+  "romantic comedy": "Romantic Comedy",
+  "romantic suspense": "Romantic Suspense",
+  "science": "Science",
+  "science and nature": "Science & Nature",
+  "science fiction": "Science Fiction",
+  "self-help": "Self-Help",
+  "self-help and personal development": "Self-Help & Personal Development",
+  "short stories": "Short Stories",
+  "social issues": "Social Issues",
+  "sociology": "Sociology",
+  "space opera": "Space Opera",
+  "spirituality": "Spirituality",
+  "sports": "Sports",
+  "sports and recreation": "Sports & Recreation",
+  "supernatural horror": "Supernatural Horror",
+  "survival": "Survival",
+  "suspense": "Suspense",
+  "sword and sorcery": "Sword & Sorcery",
+  "technology": "Technology",
+  "thriller and suspense": "Thriller & Suspense",
+  "time travel": "Time Travel",
+  "travel": "Travel",
+  "travel and geography": "Travel & Geography",
+  "travel memoir": "Travel Memoir",
+  "true crime": "True Crime",
+  "urban fantasy": "Urban Fantasy",
+  "western": "Western",
+  "western fiction": "Western Fiction",
+  "ya contemporary": "YA Contemporary",
+  "ya fantasy": "YA Fantasy",
+  "ya romance": "YA Romance",
+  "ya science fiction": "YA Science Fiction",
+  "young adult": "Young Adult",
+};
+
+function normGenreValue(s) {
+  return String(s || "").toLowerCase().replace(/&/g, "and").replace(/'/g, "").replace(/\s+/g, " ").trim();
+}
+
 // ---- API handlers ----
 
 async function handleList(env) {
@@ -402,6 +544,223 @@ async function handleSetTitleAuthor(env, request) {
     ).bind(id, row.dropbox_path, newFilename).run();
   }
   return jsonResponse({ ok: true, new_filename: newFilename });
+}
+
+const MAX_COVER_BYTES = 5 * 1024 * 1024;
+
+// Cover type from the file's own bytes, not its claimed name: JPEG
+// starts FF D8 FF, PNG starts 89 50 4E 47, WebP is RIFF then WEBP.
+function coverTypeFromBytes(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "png";
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "webp";
+  return "";
+}
+
+async function sha256HexBytes(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+}
+
+// The R2 key for a cover: the book id plus the first 12 hex digits
+// of the file's SHA-256, so a replaced cover always gets a new key
+// and a stale cached copy can never show. The stored cover_url is
+// the matching /covers/ path.
+function coverKey(id, hash, ext) {
+  return id + "-" + hash.slice(0, 12) + "." + ext;
+}
+
+function localCoverKey(coverUrl) {
+  if (typeof coverUrl !== "string") return "";
+  const m = coverUrl.match(/^\/covers\/(.+)$/);
+  return m ? m[1] : "";
+}
+
+async function handleSetCover(env, request) {
+  let form;
+  try {
+    form = await request.formData();
+  } catch (err) {
+    return badBody();
+  }
+  const id = validId(form.get("id"));
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const file = form.get("cover");
+  if (!file || typeof file !== "object" || typeof file.arrayBuffer !== "function") {
+    return jsonResponse({ ok: false, error: "Choose a cover photo first." }, 400);
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length === 0) return jsonResponse({ ok: false, error: "That cover photo is empty." }, 400);
+  if (bytes.length > MAX_COVER_BYTES) return jsonResponse({ ok: false, error: "Cover photos must be at most 5 MB." }, 400);
+  const ext = coverTypeFromBytes(bytes);
+  if (!ext) return jsonResponse({ ok: false, error: "Cover photos must be a JPEG, PNG, or WebP image." }, 400);
+  const row = await env.DB.prepare("SELECT id, cover_url FROM books WHERE id = ?").bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  if (!env.COVERS) return jsonResponse({ ok: false, error: "Cover storage is not set up yet." }, 500);
+  const hash = await sha256HexBytes(bytes);
+  const key = coverKey(id, hash, ext);
+  const contentType = ext === "jpg" ? "image/jpeg" : ext === "png" ? "image/png" : "image/webp";
+  await env.COVERS.put(key, bytes, { httpMetadata: { contentType: contentType } });
+  const oldKey = localCoverKey(row.cover_url);
+  if (oldKey && oldKey !== key) {
+    try {
+      await env.COVERS.delete(oldKey);
+    } catch (err) {
+      // A leftover copy is harmless; the row already points at the new key.
+    }
+  }
+  // Uploading a cover is a change to a pulled field other than the
+  // title or author, so it locks the book against automatic updates.
+  const coverUrl = "/covers/" + key;
+  await env.DB.prepare(
+    "UPDATE books SET cover_url = ?, locked = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
+  ).bind(coverUrl, 1, id).run();
+  return jsonResponse({ ok: true, cover_url: coverUrl });
+}
+
+async function handleSetDetails(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const id = validId(body.id);
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const author = typeof body.author === "string" ? body.author.trim() : "";
+  if (!title) return jsonResponse({ ok: false, error: "Give the book a title." }, 400);
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  const publishedDate = typeof body.published_date === "string" ? body.published_date.trim().slice(0, 40) : "";
+  const publisher = typeof body.publisher === "string" ? body.publisher.trim().slice(0, 200) : "";
+  let pageCount = null;
+  if (body.page_count !== null && body.page_count !== undefined && String(body.page_count).trim() !== "") {
+    const n = Number(body.page_count);
+    if (!Number.isInteger(n) || n <= 0) {
+      return jsonResponse({ ok: false, error: "Pages must be a whole number above zero." }, 400);
+    }
+    pageCount = n;
+  }
+  // Genres: a comma separated string or an array. Each value must
+  // match the genre table (either column); the stored spelling is
+  // the table's, and anything else is rejected, naming the bad value.
+  let genreInput = [];
+  if (typeof body.genres === "string") genreInput = body.genres.split(",");
+  else if (Array.isArray(body.genres)) genreInput = body.genres;
+  const genres = [];
+  const badGenres = [];
+  genreInput.forEach(function (g) {
+    const raw = String(g || "").trim();
+    if (!raw) return;
+    const canonical = GENRE_CANONICAL[normGenreValue(raw)];
+    if (!canonical) {
+      badGenres.push(raw);
+      return;
+    }
+    if (genres.indexOf(canonical) === -1) genres.push(canonical);
+  });
+  if (badGenres.length) {
+    return jsonResponse({ ok: false, error: "These are not in the genre list: " + badGenres.join(", ") + "." }, 400);
+  }
+  if (genres.length > 5) genres.length = 5;
+  const row = await env.DB.prepare(
+    "SELECT id, title, author, filename, dropbox_path, description, published_date, page_count, publisher, genres, locked FROM books WHERE id = ?"
+  ).bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  const newGenres = JSON.stringify(genres);
+  const oldGenres = row.genres || "[]";
+  const titleChanged = title !== row.title;
+  const authorChanged = author !== (row.author || "");
+  const otherChanged =
+    description !== (row.description || "") ||
+    publishedDate !== (row.published_date || "") ||
+    pageCount !== row.page_count ||
+    publisher !== (row.publisher || "") ||
+    newGenres !== oldGenres;
+  if (!titleChanged && !authorChanged && !otherChanged) {
+    return jsonResponse({ ok: true });
+  }
+  const titleKey = titleKeyOf(title);
+  const authorKey = authorKeyOf(author);
+  if (titleChanged || authorChanged) {
+    const dupe = await env.DB.prepare(
+      "SELECT id FROM books WHERE title_key = ? AND author_key = ? AND id != ?"
+    ).bind(titleKey, authorKey, id).first();
+    if (dupe) return jsonResponse({ ok: false, error: "Another book already has that title and author." }, 400);
+  }
+  // Only changed fields are written. A change to any field other
+  // than the title or author locks the book against automatic
+  // updates; a title or author only change leaves the lock alone,
+  // so the book still refreshes.
+  const sets = [];
+  const params = [];
+  if (titleChanged || authorChanged) {
+    sets.push("title = ?", "author = ?", "title_key = ?", "author_key = ?");
+    params.push(title, author, titleKey, authorKey);
+  }
+  if (description !== (row.description || "")) {
+    sets.push("description = ?");
+    params.push(description);
+  }
+  if (publishedDate !== (row.published_date || "")) {
+    sets.push("published_date = ?");
+    params.push(publishedDate);
+  }
+  if (pageCount !== row.page_count) {
+    sets.push("page_count = ?");
+    params.push(pageCount);
+  }
+  if (publisher !== (row.publisher || "")) {
+    sets.push("publisher = ?");
+    params.push(publisher);
+  }
+  if (newGenres !== oldGenres) {
+    sets.push("genres = ?");
+    params.push(newGenres);
+  }
+  if (otherChanged && !row.locked) {
+    sets.push("locked = ?");
+    params.push(1);
+  }
+  sets.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')");
+  await env.DB.prepare("UPDATE books SET " + sets.join(", ") + " WHERE id = ?").bind(...params, id).run();
+  let newFilename = null;
+  if ((titleChanged || authorChanged) && row.dropbox_path) {
+    newFilename = standardizedFilename(title, author, row.filename || "");
+    await env.DB.prepare(
+      "INSERT INTO pending_renames (book_id, old_path, new_filename, created_at) VALUES (?, ?, ?, datetime('now'))"
+    ).bind(id, row.dropbox_path, newFilename).run();
+  }
+  return jsonResponse({ ok: true, new_filename: newFilename, locked: otherChanged ? 1 : (row.locked ? 1 : 0) });
+}
+
+async function handleSetLocked(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const id = validId(body.id);
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const locked = body.locked === true || body.locked === 1 || body.locked === "1" ? 1 : 0;
+  const row = await env.DB.prepare("SELECT id FROM books WHERE id = ?").bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  await env.DB.prepare(
+    "UPDATE books SET locked = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
+  ).bind(locked, id).run();
+  return jsonResponse({ ok: true, locked: locked });
+}
+
+async function handleCoverGet(env, key) {
+  if (!/^[0-9]+-[0-9a-f]{12}\.(jpg|png|webp)$/.test(key)) {
+    return new Response("Not found", { status: 404 });
+  }
+  if (!env.COVERS) return new Response("Cover storage is not set up yet.", { status: 500 });
+  const obj = await env.COVERS.get(key);
+  if (!obj) return new Response("Not found", { status: 404 });
+  const ext = key.slice(key.lastIndexOf(".") + 1);
+  const contentType = ext === "jpg" ? "image/jpeg" : ext === "png" ? "image/png" : "image/webp";
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Robots-Tag": "noindex, nofollow",
+    },
+  });
 }
 
 function cleanListName(value) {
@@ -569,7 +928,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v13";
+const CACHE = "bookshelf-v14";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -726,6 +1085,10 @@ function pageHtml() {
   .detailtitlewrap .detailtitle { flex: 1; min-width: 0; }
   .detailtitlewrap .btn { flex: none; margin-top: 10px; }
   .editinput { width: 100%; box-sizing: border-box; margin: 6px 0; }
+  .editarea { width: 100%; box-sizing: border-box; margin: 6px 0; resize: vertical; }
+  .editfile { margin: 6px 0; }
+  .lockednote { background: #2e2113; border: 1px solid #4a3220; border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; font-size: 14px; color: #c9b69a; }
+  .lockednote .btn { margin-left: 8px; }
   .editbtns { display: flex; gap: 8px; margin: 8px 0 12px; }
   .detailtop { display: flex; gap: 12px; align-items: flex-start; }
   .detailcoverwrap { flex: none; }
@@ -881,7 +1244,9 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, cover photo, description, release date, pages, publisher, and genres. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
+    <h3>Editing details and automatic updates</h3>
+    <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -931,6 +1296,9 @@ function safeCover(url) {
   if (typeof url !== "string") return "";
   var u = url.trim();
   if (/^https?:\\/\\//i.test(u)) return u;
+  // Covers saved in Bookshelf itself live under /covers/ with a
+  // key of book id, hash, and extension.
+  if (/^\\/covers\\/[0-9]+-[0-9a-f]{12}\\.(jpg|png|webp)$/.test(u)) return u;
   return "";
 }
 
@@ -1573,8 +1941,9 @@ function layoutDetail() {
   // keyboard fires a resize, which calls this again, so the layout
   // stays exactly where it is until the field is blurred. The first
   // placement is unaffected: renderDetail runs this before focus is set.
+  // Every edit field id starts with "edit", so one check covers them all.
   var ae = document.activeElement;
-  if (ae && (ae.id === "editTitle" || ae.id === "editAuthor")) return;
+  if (ae && ae.id && ae.id.indexOf("edit") === 0) return;
   sections.forEach(function (s) { main.appendChild(s); });
   var coverHeight = 0;
   if (cover) {
@@ -1601,12 +1970,27 @@ function renderDetail() {
   html += "</div>";
   html += '<div class="detailmain">';
   if (detailEditing) {
+    var releaseValue = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
     html += '<div class="detailsection" data-section="edit">';
     html += '<label class="fieldlabel" for="editTitle">Title</label>';
     html += '<input type="text" class="editinput" id="editTitle" maxlength="200" value="' + esc(book.title) + '">';
     html += '<label class="fieldlabel" for="editAuthor">Author</label>';
     html += '<input type="text" class="editinput" id="editAuthor" maxlength="120" value="' + esc(book.author || "") + '">';
-    html += '<div class="editbtns"><button type="button" class="btn primary" data-action="save-title-author">Save</button>';
+    html += '<label class="fieldlabel" for="editCover">Cover photo</label>';
+    html += '<input type="file" class="editfile" id="editCover" accept="image/jpeg,image/png,image/webp">';
+    html += '<p class="muted">A photo up to 5 MB. It replaces the cover and is saved in Bookshelf.</p>';
+    html += '<label class="fieldlabel" for="editDescription">Description</label>';
+    html += '<textarea class="editarea" id="editDescription" rows="4">' + esc(book.description || "") + '</textarea>';
+    html += '<label class="fieldlabel" for="editRelease">Release date</label>';
+    html += '<input type="text" class="editinput" id="editRelease" maxlength="40" value="' + esc(releaseValue) + '">';
+    html += '<label class="fieldlabel" for="editPages">Pages</label>';
+    html += '<input type="number" class="editinput" id="editPages" min="1" step="1" value="' + (book.page_count ? String(book.page_count) : "") + '">';
+    html += '<label class="fieldlabel" for="editPublisher">Publisher</label>';
+    html += '<input type="text" class="editinput" id="editPublisher" maxlength="200" value="' + esc(book.publisher || "") + '">';
+    html += '<label class="fieldlabel" for="editGenres">Genres</label>';
+    html += '<input type="text" class="editinput" id="editGenres" maxlength="200" value="' + esc((book.genres || []).join(", ")) + '">';
+    html += '<p class="muted">Genres from the Bookshelf list, separated by commas.</p>';
+    html += '<div class="editbtns"><button type="button" class="btn primary" data-action="save-details">Save</button>';
     html += '<button type="button" class="btn" data-action="cancel-title-author">Cancel</button></div>';
     html += "</div>";
   } else {
@@ -1632,6 +2016,9 @@ function renderDetail() {
   html += "</div>";
   html += '<div class="detailunder"></div>';
   if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
+  if (book.locked) {
+    html += '<p class="lockednote">Automatic updates off for this book. <button type="button" class="btn small" data-action="set-locked-off">Turn updates back on</button></p>';
+  }
   html += '<div class="detailactions">';
   html += '<div class="inlinerow"><span class="fieldlabel inline">Reader</span><select id="detailReader" class="narrowselect">';
   ["Randy", "Lisa", "All"].forEach(function (r) {
@@ -1665,15 +2052,67 @@ function renderDetail() {
   if (coverImg && !coverImg.complete) coverImg.addEventListener("load", layoutDetail);
 }
 
-function saveTitleAuthor(book) {
+function saveDetails(book) {
   var titleEl = $("editTitle");
   var authorEl = $("editAuthor");
+  var descEl = $("editDescription");
+  var releaseEl = $("editRelease");
+  var pagesEl = $("editPages");
+  var publisherEl = $("editPublisher");
+  var genresEl = $("editGenres");
+  var coverEl = $("editCover");
   if (!titleEl || !authorEl) return;
-  postJson("/api/set-title-author", { id: book.id, title: titleEl.value, author: authorEl.value }).then(function (data) {
+  var details = {
+    id: book.id,
+    title: titleEl.value,
+    author: authorEl.value,
+    description: descEl ? descEl.value : "",
+    published_date: releaseEl ? releaseEl.value : "",
+    page_count: pagesEl ? pagesEl.value : "",
+    publisher: publisherEl ? publisherEl.value : "",
+    genres: genresEl ? genresEl.value : ""
+  };
+  var coverFile = coverEl && coverEl.files && coverEl.files[0] ? coverEl.files[0] : null;
+  var chain = Promise.resolve();
+  if (coverFile) {
+    var form = new FormData();
+    form.append("id", String(book.id));
+    form.append("cover", coverFile);
+    chain = chain.then(function () {
+      return fetch("/api/set-cover", { method: "POST", body: form }).then(function (resp) {
+        if (resp.status === 403) {
+          window.location.reload();
+          return Promise.reject(new Error("Please enter the passcode first."));
+        }
+        return resp.json().catch(function () { return {}; }).then(function (data) {
+          if (!resp.ok || !data.ok) throw new Error(data.error || "Something went wrong. Try again.");
+          return data;
+        });
+      });
+    });
+  }
+  chain.then(function () {
+    return postJson("/api/set-details", details);
+  }).then(function (data) {
     detailEditing = false;
     return refreshData().then(function () { return data; });
   }).then(function (data) {
-    showNotice(data && data.new_filename ? "Saved. The Dropbox file will be renamed to " + data.new_filename + "." : "Saved.");
+    var msg = "Saved.";
+    if (data && data.new_filename) msg += " The Dropbox file will be renamed to " + data.new_filename + ".";
+    // Only mention the lock when this save locked the book; a book
+    // that was already locked says nothing new about it.
+    if (data && data.locked && !book.locked) msg += " Automatic updates are off for this book now.";
+    showNotice(msg);
+  }).catch(function (err) {
+    showNotice(err.message, true);
+  });
+}
+
+function setLocked(book, locked) {
+  postJson("/api/set-locked", { id: book.id, locked: locked }).then(function () {
+    return refreshData();
+  }).then(function () {
+    showNotice(locked ? "Automatic updates are off for this book." : "Automatic updates are back on for this book.");
   }).catch(function (err) {
     showNotice(err.message, true);
   });
@@ -2023,15 +2462,16 @@ $("detailBody").addEventListener("click", function (e) {
     var inp = $("editTitle");
     if (inp) { inp.focus(); inp.select(); }
   }
-  else if (action === "save-title-author") saveTitleAuthor(book);
+  else if (action === "save-details") saveDetails(book);
+  else if (action === "set-locked-off") setLocked(book, false);
   else if (action === "cancel-title-author") { detailEditing = false; renderDetail(); }
 });
 
 $("detailBody").addEventListener("keydown", function (e) {
-  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor")) {
+  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor" || e.target.id === "editRelease" || e.target.id === "editPages" || e.target.id === "editPublisher" || e.target.id === "editGenres")) {
     e.preventDefault();
     var book = bookById(state.detailId);
-    if (book) saveTitleAuthor(book);
+    if (book) saveDetails(book);
   }
 });
 
@@ -2198,6 +2638,18 @@ export default {
       }
       if (path === "/api/set-title-author" && request.method === "POST") {
         return await handleSetTitleAuthor(env, request);
+      }
+      if (path === "/api/set-details" && request.method === "POST") {
+        return await handleSetDetails(env, request);
+      }
+      if (path === "/api/set-cover" && request.method === "POST") {
+        return await handleSetCover(env, request);
+      }
+      if (path === "/api/set-locked" && request.method === "POST") {
+        return await handleSetLocked(env, request);
+      }
+      if (path.indexOf("/covers/") === 0 && request.method === "GET") {
+        return await handleCoverGet(env, path.slice("/covers/".length));
       }
       if (path === "/api/lists/create" && request.method === "POST") {
         return await handleListCreate(env, request);

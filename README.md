@@ -3,7 +3,7 @@
 Bookshelf is the private book collection app for Randy and Lisa. It shows
 every book that has been loaded into the collection, grouped into shelves,
 with cover and spine views, star ratings, read marks, reader labels, custom
-lists, and a link to the file in Dropbox.
+lists, editable book details, and a link to the file in Dropbox.
 
 ## Views
 
@@ -24,15 +24,41 @@ and Read button beside it, in that order, while they fit. A section that
 would run past the bottom of the cover moves under it whole, so a label and
 its value never split apart. The description comes right after
 the Read button, under the cover, then the Reader and List dropdowns and
-the Dropbox and source links.
+the Dropbox and source links. Tap Edit beside the title to change the
+book's details: title, author, cover photo, description, release date,
+pages, publisher, and genres. The Google rating is pulled from the
+internet and is not editable. Changing only the title or author queues
+a rename of the Dropbox file, and the book still refreshes from the
+internet. Changing anything else turns automatic updates off for that
+book, and a note in the details says so, with a button to turn updates
+back on. A locked book still gets title and author changes from Dropbox
+filenames, and still leaves the library when its file leaves Dropbox.
+
+## Covers
+
+Covers are saved in Bookshelf itself, in the R2 bucket `bookshelf-covers`
+(binding `COVERS`). A cover's key is the book id, a short hash of the
+image, and the extension, for example `253-90c35dd5185e.jpg`, and the
+book's `cover_url` is the local path `/covers/253-90c35dd5185e.jpg`.
+Replacing a cover always makes a new key, so a stale cached copy can
+never show, and the old object is deleted. Covers are served from
+`/covers/<key>` behind the same passcode gate as everything else, with a
+one-year immutable cache. Upload a photo of a cover from the Edit form;
+it must be a JPEG, PNG, or WebP image of at most 5 MB. Books whose
+covers have not been saved yet still show the old external cover link.
+The one-off move of the existing external covers into R2 is done by
+`~/workspace/book-library-build/migrate_covers_to_r2.py`, which is
+resumable, throttled, and takes its R2 credentials from environment
+variables. Run it only after the bucket exists and this version is live.
 
 ## Files
 
 - `worker.js`: the whole app. One Cloudflare Worker, no dependencies, no
-  build step. It serves the page, the JSON API, and the installable-app
+  build step. It serves the page, the JSON API, the cover images, and the installable-app
   files (manifest, service worker, icon).
 - `wrangler.jsonc`: Worker config. Name `bookshelf`, D1 binding `DB`,
-  database `bookshelf`. No cron triggers in v1.
+  database `bookshelf`, R2 binding `COVERS`, bucket `bookshelf-covers`.
+  No cron triggers in v1.
 - `schema.sql`: a copy of the live D1 schema, as applied.
 - `package.json`: private package with a `check` script that runs
   `node --check worker.js`.
@@ -47,8 +73,9 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
   description, page count, publisher, published date, Google rating and
   ratings count, ISBN, language, info link, Dropbox path, filename,
   Dropbox file id (`dropbox_id`), enrichment source (`enriched`:
-  `openlibrary`, `watchlist`, or empty), format, and added/created/updated
-  timestamps.
+  `openlibrary`, `watchlist`, or empty), format, `locked` (1 when a hand
+  edit has turned automatic updates off for the book, migration 0005),
+  and added/created/updated timestamps.
 - `lists`: named custom lists.
 - `list_items`: which books sit in which list, and in what order
   (`position`).
@@ -57,8 +84,12 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
 - `settings`: key and value settings, unused in v1.
 
 Books are loaded by an import job, not through this app. The app only
-reads books and records read marks, star ratings, reader labels, and
-custom lists.
+reads books and records read marks, star ratings, reader labels, custom
+lists, and detail edits. The nightly sync refreshes a book's details
+from the internet when its title or author changes, but never refreshes
+a book with `locked` set; it still applies title and author changes
+from Dropbox filenames to locked books, and still removes a locked book
+when its file leaves Dropbox.
 
 ## Passcode gate
 
@@ -88,7 +119,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v13`. When the app shell
+The service worker cache is named `bookshelf-v14`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v13`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v14`) and
 deploy. The new worker then clears the old cache on activation.
