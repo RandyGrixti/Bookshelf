@@ -83,3 +83,13 @@ CREATE TABLE IF NOT EXISTS d1_migrations (
   name TEXT NOT NULL UNIQUE,
   applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS pending_renames (
+  id INTEGER PRIMARY KEY,
+  book_id INTEGER NOT NULL,
+  old_path TEXT NOT NULL,
+  new_filename TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_renames_book ON pending_renames(book_id);

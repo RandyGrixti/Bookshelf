@@ -4,7 +4,8 @@
 // installable-app files (manifest, service worker, icon). Data lives
 // in the D1 database "bookshelf" (binding DB). Books are loaded by an
 // import job, not through this app. The app only reads them and
-// records read marks, star ratings, reader labels, and custom lists.
+// records read marks, star ratings, reader labels, title and author
+// edits, and custom lists.
 //
 // The page is unlisted on purpose: it is never linked or indexed, it
 // asks search engines to stay away, and once the SITE_PASSCODE secret
@@ -250,6 +251,33 @@ function badBody() {
   return jsonResponse({ ok: false, error: "That did not come through properly." }, 400);
 }
 
+// Title and author keys use the same normalization as the seed import:
+// lowercase, a leading "the " dropped from titles, every run of
+// non-alphanumeric characters replaced with one space, spaces collapsed.
+function titleKeyOf(title) {
+  return String(title).toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function authorKeyOf(author) {
+  return String(author).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Dropbox file names may not contain \ / : ? * " < > | or control
+// characters. The standardized name is "Title - Author" plus the
+// row's current file extension, capped at 200 characters before the
+// extension so the name always fits.
+function sanitizeDropboxName(name) {
+  return String(name).replace(/[\\/:?*"<>|\x00-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function standardizedFilename(title, author, filename) {
+  const dot = String(filename || "").lastIndexOf(".");
+  const ext = dot > 0 ? String(filename).slice(dot) : "";
+  let base = sanitizeDropboxName(author ? title + " - " + author : title);
+  if (!base) base = "Untitled";
+  return base + ext;
+}
+
 // ---- API handlers ----
 
 async function handleList(env) {
@@ -336,6 +364,43 @@ async function handleSetReader(env, request) {
     "UPDATE books SET reader = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
   ).bind(reader, id).run();
   return jsonResponse({ ok: true, reader: reader });
+}
+
+async function handleSetTitleAuthor(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const id = validId(body.id);
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const author = typeof body.author === "string" ? body.author.trim() : "";
+  if (!title) return jsonResponse({ ok: false, error: "Give the book a title." }, 400);
+  const row = await env.DB.prepare(
+    "SELECT id, title, author, filename, dropbox_path FROM books WHERE id = ?"
+  ).bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  if (title === row.title && author === (row.author || "")) {
+    return jsonResponse({ ok: true });
+  }
+  const titleKey = titleKeyOf(title);
+  const authorKey = authorKeyOf(author);
+  const dupe = await env.DB.prepare(
+    "SELECT id FROM books WHERE title_key = ? AND author_key = ? AND id != ?"
+  ).bind(titleKey, authorKey, id).first();
+  if (dupe) return jsonResponse({ ok: false, error: "Another book already has that title and author." }, 400);
+  await env.DB.prepare(
+    "UPDATE books SET title = ?, author = ?, title_key = ?, author_key = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
+  ).bind(title, author, titleKey, authorKey, id).run();
+  // The Worker has no Dropbox access, so the rename itself is left
+  // for the nightly job: record it in pending_renames and the job
+  // renames old_path to new_filename.
+  let newFilename = null;
+  if (row.dropbox_path) {
+    newFilename = standardizedFilename(title, author, row.filename || "");
+    await env.DB.prepare(
+      "INSERT INTO pending_renames (book_id, old_path, new_filename, created_at) VALUES (?, ?, ?, datetime('now'))"
+    ).bind(id, row.dropbox_path, newFilename).run();
+  }
+  return jsonResponse({ ok: true, new_filename: newFilename });
 }
 
 function cleanListName(value) {
@@ -627,9 +692,23 @@ function pageHtml() {
   #aboutOverlay { z-index: 35; }
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.65); }
   .panel { position: relative; width: 100%; max-width: 640px; background: #241a10; border: 1px solid #4a3220; border-radius: 12px; padding: 16px; margin: auto 0; }
+  .covercheck { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(36, 23, 8, .88); color: #8fce7a; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
   .detailcover { width: 130px; border-radius: 8px; display: block; margin: 12px 0; }
   .detailtitle { font-size: 22px; margin: 12px 0 4px; }
   .detailauthor { font-size: 16px; color: #c9b69a; margin: 0 0 12px; }
+  .detailtitlewrap { display: flex; align-items: flex-start; gap: 10px; }
+  .detailtitlewrap .detailtitle { flex: 1; min-width: 0; }
+  .detailtitlewrap .btn { flex: none; margin-top: 10px; }
+  .editinput { width: 100%; box-sizing: border-box; margin: 6px 0; }
+  .editbtns { display: flex; gap: 8px; margin: 8px 0 12px; }
+  @media (min-width: 560px) {
+    .detailtop { display: flex; gap: 16px; align-items: flex-start; }
+    .detailcoverwrap { flex: none; }
+    .detailcover { width: 150px; margin: 0; }
+    .detailmain { flex: 1; min-width: 0; }
+    .detailmain .detailtitle { margin-top: 0; }
+    .detailmain .detailtitlewrap .btn { margin-top: 0; }
+  }
   .desc { line-height: 1.5; }
   .metarow { display: flex; gap: 8px; margin: 6px 0; font-size: 15px; }
   .metalabel { color: #c9b69a; flex: none; width: 110px; }
@@ -665,8 +744,8 @@ function pageHtml() {
     </div>
   </div>
   <div class="segbar" role="group" aria-label="View">
-    <button type="button" class="segbtn active" id="viewList">List</button>
-    <button type="button" class="segbtn" id="viewCover">Cover</button>
+    <button type="button" class="segbtn" id="viewList">List</button>
+    <button type="button" class="segbtn active" id="viewCover">Cover</button>
   </div>
   <input type="search" id="search" placeholder="Search title or author" aria-label="Search title or author">
   <div class="ctrlrow">
@@ -734,7 +813,7 @@ function pageHtml() {
     <h2>About Bookshelf</h2>
     <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox.</p>
     <h3>Views</h3>
-    <p>Use the List and Cover buttons at the top to switch views. List shows each book as a row with its title and author. Cover shows the book covers in a grid. A book with no cover shows its title and author inside its box instead.</p>
+    <p>Bookshelf opens on the Cover view, showing the book covers in a grid. Use the List and Cover buttons at the top to switch views. List shows each book as a row with its title and author. Cover shows the book covers in a grid. A book with no cover shows its title and author inside its box instead.</p>
     <h3>Shelves</h3>
     <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick.</p>
     <h3>Sorting</h3>
@@ -744,11 +823,11 @@ function pageHtml() {
     <h3>Filters</h3>
     <p>The All, Randy, and Lisa buttons filter by reader. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box narrows the shelves to one genre. The Read box shows all books, only books marked Read, or only books not yet read.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details: cover, description, pages, publisher, release date, genres, and the Google rating when one is known. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details: cover, description, pages, publisher, release date, genres, and the Google rating when one is known. Tap Edit beside the title to change the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check. Tap Close to go back to the shelves.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap Clear to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
-    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark shows beside read books in List view. Tap the button again to clear the mark.</p>
+    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows beside read books in List view and as a small badge on the cover in Cover view. Tap the button again to clear the mark.</p>
     <h3>Reader field</h3>
     <p>The Reader box in the details says who the book is for: Randy, Lisa, or All. Change it and it saves at once.</p>
     <h3>Lists</h3>
@@ -766,7 +845,7 @@ function pageHtml() {
 var state = {
   books: [],
   lists: [],
-  view: "list",
+  view: "cover",
   search: "",
   sort: "title",
   dir: "asc",
@@ -994,6 +1073,7 @@ function coverBoxHtml(book) {
   } else {
     html += '<span class="nocover"><span class="nctitle">' + esc(book.title) + '</span><span class="ncauthor">' + esc(book.author || "") + "</span></span>";
   }
+  if (book.is_read) html += '<span class="covercheck" aria-label="Read">&#10003;</span>';
   html += "</button>";
   return html;
 }
@@ -1054,24 +1134,42 @@ function starStepsHtml(rating) {
 
 function openDetail(id) {
   state.detailId = id;
+  detailEditing = false;
   renderDetail();
   $("detailOverlay").hidden = false;
 }
 
 function closeDetail() {
   state.detailId = null;
+  detailEditing = false;
   $("detailOverlay").hidden = true;
 }
+
+var detailEditing = false;
 
 function renderDetail() {
   var book = bookById(state.detailId);
   if (!book) { closeDetail(); return; }
   var html = "";
   html += '<button type="button" class="btn" data-action="close-detail">Close</button>';
+  html += '<div class="detailtop">';
   var cover = safeCover(book.cover_url);
+  html += '<div class="detailcoverwrap">';
   if (cover) html += '<img class="detailcover" src="' + esc(cover) + '" alt="">';
-  html += '<h2 class="detailtitle">' + esc(book.title) + "</h2>";
-  html += '<p class="detailauthor">' + esc(book.author || "") + "</p>";
+  html += "</div>";
+  html += '<div class="detailmain">';
+  if (detailEditing) {
+    html += '<label class="fieldlabel" for="editTitle">Title</label>';
+    html += '<input type="text" class="editinput" id="editTitle" maxlength="200" value="' + esc(book.title) + '">';
+    html += '<label class="fieldlabel" for="editAuthor">Author</label>';
+    html += '<input type="text" class="editinput" id="editAuthor" maxlength="120" value="' + esc(book.author || "") + '">';
+    html += '<div class="editbtns"><button type="button" class="btn primary" data-action="save-title-author">Save</button>';
+    html += '<button type="button" class="btn" data-action="cancel-title-author">Cancel</button></div>';
+  } else {
+    html += '<div class="detailtitlewrap"><h2 class="detailtitle">' + esc(book.title) + "</h2>";
+    html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div>';
+    html += '<p class="detailauthor">' + esc(book.author || "") + "</p>";
+  }
   if (book.description) html += '<p class="desc">' + esc(book.description) + "</p>";
   if (book.page_count) html += metaRow("Pages", String(book.page_count));
   if (book.publisher) html += metaRow("Publisher", book.publisher);
@@ -1109,7 +1207,23 @@ function renderDetail() {
   var db = dropboxUrl(book.dropbox_path);
   if (db) html += '<div><a class="btn" href="' + esc(db) + '" target="_blank" rel="noopener noreferrer">Open in Dropbox</a></div>';
   html += "</div>";
+  html += "</div>";
+  html += "</div>";
   $("detailBody").innerHTML = html;
+}
+
+function saveTitleAuthor(book) {
+  var titleEl = $("editTitle");
+  var authorEl = $("editAuthor");
+  if (!titleEl || !authorEl) return;
+  postJson("/api/set-title-author", { id: book.id, title: titleEl.value, author: authorEl.value }).then(function (data) {
+    detailEditing = false;
+    return refreshData().then(function () { return data; });
+  }).then(function (data) {
+    showNotice(data && data.new_filename ? "Saved. The Dropbox file will be renamed to " + data.new_filename + "." : "Saved.");
+  }).catch(function (err) {
+    showNotice(err.message, true);
+  });
 }
 
 function saveRating(book, rating) {
@@ -1342,6 +1456,22 @@ $("detailBody").addEventListener("click", function (e) {
   else if (action === "clear-rating") saveRating(book, null);
   else if (action === "toggle-read") saveRead(book, !book.is_read);
   else if (action === "add-to-list") addDetailToList(book);
+  else if (action === "edit-title-author") {
+    detailEditing = true;
+    renderDetail();
+    var inp = $("editTitle");
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  else if (action === "save-title-author") saveTitleAuthor(book);
+  else if (action === "cancel-title-author") { detailEditing = false; renderDetail(); }
+});
+
+$("detailBody").addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor")) {
+    e.preventDefault();
+    var book = bookById(state.detailId);
+    if (book) saveTitleAuthor(book);
+  }
 });
 
 $("detailBody").addEventListener("change", function (e) {
@@ -1503,6 +1633,9 @@ export default {
       }
       if (path === "/api/set-reader" && request.method === "POST") {
         return await handleSetReader(env, request);
+      }
+      if (path === "/api/set-title-author" && request.method === "POST") {
+        return await handleSetTitleAuthor(env, request);
       }
       if (path === "/api/lists/create" && request.method === "POST") {
         return await handleListCreate(env, request);
