@@ -341,6 +341,7 @@ var GENRE_CANONICAL = {
   "historical romance": "Historical Romance",
   "history": "History",
   "horror": "Horror",
+  "humour": "Humour",
   "language and linguistics": "Language & Linguistics",
   "leadership and management": "Leadership & Management",
   "legal thriller": "Legal Thriller",
@@ -384,6 +385,7 @@ var GENRE_CANONICAL = {
   "romance": "Romance",
   "romantic comedy": "Romantic Comedy",
   "romantic suspense": "Romantic Suspense",
+  "satire": "Satire",
   "science": "Science",
   "science and nature": "Science & Nature",
   "science fiction": "Science Fiction",
@@ -929,7 +931,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v15";
+const CACHE = "bookshelf-v16";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1261,7 +1263,7 @@ function pageHtml() {
     <h3>Search</h3>
     <p>The search box matches words in the title or the author name. Clear it to see all books again.</p>
     <h3>Filters</h3>
-    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 28 genres. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p>
+    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 31 genres in alphabetical order. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p>
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
@@ -1357,41 +1359,43 @@ function firstGenreOf(book) {
   return "";
 }
 
-// Randy's genre table: the 28 genres in the Filters popup, and the
-// subgenre each stored genre belongs to. A filter match is
-// hierarchical, not substring: Fiction matches Historical Fiction,
-// Classics and Magical Realism, but not Detective Fiction, which
-// belongs to Mystery & Crime.
+// Randy's genre table: the 31 genres in the Filters popup, listed
+// alphabetically, and the subgenre each stored genre belongs to. A
+// filter match is hierarchical, not substring: Fiction matches
+// Historical Fiction, Classics and Magical Realism, but not Detective
+// Fiction, which belongs to Mystery & Crime.
 var GENRES = [
-  "Fiction",
-  "Non-Fiction",
-  "Mystery & Crime",
-  "Thriller & Suspense",
-  "Science Fiction",
-  "Fantasy",
-  "Horror",
-  "Romance",
   "Action & Adventure",
-  "Western",
-  "Biography & Memoir",
-  "History",
-  "Politics & Society",
-  "Business & Economics",
-  "Self-Help & Personal Development",
-  "Psychology & Philosophy",
-  "Religion & Spirituality",
-  "Health & Wellness",
-  "Science & Nature",
-  "Travel & Geography",
-  "Food & Cooking",
   "Arts & Culture",
-  "Sports & Recreation",
+  "Biography & Memoir",
+  "Business & Economics",
+  "Children's Books",
   "Education & Reference",
   "Family & Relationships",
-  "Poetry & Drama",
-  "Children's Books",
-  "Young Adult",
+  "Fantasy",
+  "Fiction",
+  "Food & Cooking",
   "Graphic Literature",
+  "Health & Wellness",
+  "History",
+  "Horror",
+  "Humour",
+  "Mystery & Crime",
+  "Non-Fiction",
+  "Poetry & Drama",
+  "Politics & Society",
+  "Psychology & Philosophy",
+  "Religion & Spirituality",
+  "Romance",
+  "Satire",
+  "Science & Nature",
+  "Science Fiction",
+  "Self-Help & Personal Development",
+  "Sports & Recreation",
+  "Thriller & Suspense",
+  "Travel & Geography",
+  "Western",
+  "Young Adult",
 ];
 
 var SUBGENRE_PARENT = {
@@ -1540,9 +1544,14 @@ Object.keys(SUBGENRE_PARENT).forEach(function (key) {
   if (!SUBGENRES_BY_PARENT[parent]) SUBGENRES_BY_PARENT[parent] = [];
   SUBGENRES_BY_PARENT[parent].push(titleCaseGenre(key));
 });
+// Subgenres show alphabetically under their parent in the picker,
+// like the level-1 genres themselves.
+Object.keys(SUBGENRES_BY_PARENT).forEach(function (parent) {
+  SUBGENRES_BY_PARENT[parent].sort();
+});
 
 // Every table value by its normalized name, for validating picks:
-// the 28 level-1 genres plus the 104 subgenres in canonical spelling.
+// the 31 level-1 genres plus the 104 subgenres in canonical spelling.
 var GENRE_NAMES = {};
 GENRES.forEach(function (g) { GENRE_NAMES[normGenre(g)] = g; });
 Object.keys(SUBGENRE_PARENT).forEach(function (key) {
