@@ -2,6 +2,7 @@
 -- Applied via d1_bookshelf.py apply-0001 on Nov 18, 2026.
 -- dropbox_id and enriched arrive with migration 0003
 -- locked arrives with migration 0005
+-- series_name and series_position arrive with migration 0006
 -- This file is a copy of ~/workspace/bookshelf-build/migrations/0001_init.sql,
 -- kept here as the record of the live schema.
 
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS books (
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
   locked INTEGER NOT NULL DEFAULT 0,
+  series_name TEXT NOT NULL DEFAULT '',
+  series_position REAL,
   UNIQUE (title_key, author_key)
 );
 

@@ -931,7 +931,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v18";
+const CACHE = "bookshelf-v19";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1078,6 +1078,7 @@ function pageHtml() {
   .overlay[hidden] { display: none; }
   #listsOverlay { z-index: 30; }
   #aboutOverlay { z-index: 35; }
+  #seriesOverlay { z-index: 45; }
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.65); }
   .panel { position: relative; width: 100%; max-width: 640px; background: #241a10; border: 1px solid #4a3220; border-radius: 12px; padding: 16px; margin: auto 0; }
   .covercheck { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(36, 23, 8, .88); color: #8fce7a; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
@@ -1165,6 +1166,9 @@ function pageHtml() {
   .listthumb { width: 40px; height: 60px; object-fit: cover; border-radius: 4px; flex: none; background: #2b1d12; border: 1px solid #3a2413; }
   .listthumb.empty { display: block; }
   .listbooktitle { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; color: #f2e8d5; font-size: 16px; font-weight: 600; padding: 8px 0; }
+  .serieslink { background: transparent; border: 0; color: #d9a441; font-size: 15px; font-weight: 600; padding: 0; cursor: pointer; text-align: left; }
+  .seriesinfo { flex: 1; min-width: 0; }
+  .seriesmeta { display: block; color: #c9b69a; font-size: 13px; margin-top: 2px; }
   .picker { margin: 10px 0; }
   .pickerrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #33220f; }
   .pickertitle { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
@@ -1252,6 +1256,13 @@ function pageHtml() {
   </div>
 </div>
 
+<div id="seriesOverlay" class="overlay" hidden>
+  <div class="backdrop"></div>
+  <div class="panel" role="dialog" aria-modal="true" aria-label="Series">
+    <div id="seriesBody"></div>
+  </div>
+</div>
+
 <div id="aboutOverlay" class="overlay" hidden>
   <div class="backdrop"></div>
   <div class="panel" role="dialog" aria-modal="true" aria-label="About Bookshelf">
@@ -1273,7 +1284,9 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, cover photo, description, release date, pages, publisher, and genres. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, cover photo, description, release date, pages, publisher, and genres. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
+    <h3>Series</h3>
+    <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p>
     <h3>Editing details and automatic updates</h3>
     <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, or click the paste box under the cover photo and paste an image, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
     <h3>Star ratings</h3>
@@ -2087,6 +2100,14 @@ function renderDetail() {
     html += '<div class="detailsection" data-section="title"><div class="detailtitlewrap"><h2 class="detailtitle">' + esc(book.title) + "</h2>";
     html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div></div>';
     html += '<div class="detailsection" data-section="author"><p class="detailauthor">' + esc(book.author || "") + "</p></div>";
+    // The Series row shows only when the book belongs to a series.
+    // The name is a button that opens the series view.
+    if (book.series_name) {
+      html += '<div class="detailsection" data-section="series"><div class="metarow"><span class="metalabel">Series</span><span><button type="button" class="serieslink" data-action="open-series">' + esc(book.series_name) + "</button>";
+      var pos = formatSeriesPosition(book.series_position);
+      if (pos) html += ' <span class="muted">' + esc(pos) + "</span>";
+      html += "</span></div></div>";
+    }
   }
   var readLabel = book.is_read ? ("Read" + (book.read_on ? " on " + book.read_on : "")) : "Mark as read";
   html += '<div class="detailsection" data-section="rating"><div><span class="fieldlabel">My rating</span><div class="ratingrow">' + starStepsHtml(book.rating);
@@ -2570,6 +2591,85 @@ function addToList(list, bookId) {
     .catch(function (err) { showNotice(err.message, true); });
 }
 
+// ---- Series view ----
+// Books in a series, in book-number order only. Books with no
+// position go last, ordered by release date (published date, or
+// the year when no full date is known), then title.
+var seriesName = null;
+
+function formatSeriesPosition(p) {
+  if (p === null || p === undefined || p === "") return "";
+  var n = Number(p);
+  if (!Number.isFinite(n)) return "";
+  return "Book " + (n % 1 === 0 ? String(Math.round(n)) : String(n));
+}
+
+function seriesReleaseYear(book) {
+  if (book.year) return Number(book.year) || 0;
+  var m = String(book.published_date || "").match(/(\d{4})/);
+  return m ? Number(m[1]) : 0;
+}
+
+function seriesBooks(name) {
+  var list = state.books.filter(function (b) { return (b.series_name || "") === name; });
+  list.sort(function (a, b) {
+    var pa = a.series_position, pb = b.series_position;
+    var ha = pa !== null && pa !== undefined && pa !== "";
+    var hb = pb !== null && pb !== undefined && pb !== "";
+    if (ha && hb) {
+      var d = Number(pa) - Number(pb);
+      if (d) return d;
+      return sortTitleOf(a).localeCompare(sortTitleOf(b));
+    }
+    if (ha) return -1;
+    if (hb) return 1;
+    var ya = seriesReleaseYear(a), yb = seriesReleaseYear(b);
+    if (ya !== yb) return ya - yb;
+    var da = String(a.published_date || ""), db = String(b.published_date || "");
+    if (da !== db) return da < db ? -1 : 1;
+    return sortTitleOf(a).localeCompare(sortTitleOf(b));
+  });
+  return list;
+}
+
+function openSeries(name) {
+  seriesName = name;
+  renderSeries();
+  $("seriesOverlay").hidden = false;
+}
+
+function closeSeries() {
+  seriesName = null;
+  $("seriesOverlay").hidden = true;
+}
+
+function renderSeries() {
+  var books = seriesName ? seriesBooks(seriesName) : [];
+  var html = "";
+  html += '<button type="button" class="btn" data-action="close-series">Close</button>';
+  html += "<h2>" + esc(seriesName || "") + "</h2>";
+  html += '<p class="muted">' + books.length + (books.length === 1 ? " book" : " books") + " in book-number order.</p>";
+  if (!books.length) html += '<p class="muted">No books in this series.</p>';
+  books.forEach(function (book) {
+    var cover = safeCover(book.cover_url);
+    html += '<div class="listbook">';
+    if (cover) html += '<img class="listthumb" src="' + esc(cover) + '" alt="" loading="lazy">';
+    else html += '<span class="listthumb empty" aria-hidden="true"></span>';
+    html += '<div class="seriesinfo">';
+    html += '<button type="button" class="listbooktitle" data-action="open-series-book" data-book-id="' + book.id + '">' + esc(book.title) + "</button>";
+    var meta = [];
+    var pos = formatSeriesPosition(book.series_position);
+    if (pos) meta.push(pos);
+    if (book.author) meta.push(book.author);
+    var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
+    if (rel) meta.push(rel);
+    html += '<span class="seriesmeta">' + esc(meta.join(" \u00b7 ")) + "</span>";
+    html += "</div>";
+    html += "</div>";
+  });
+  $("seriesBody").innerHTML = html;
+}
+
 // ---- Wiring ----
 
 function setFiltersOpen(open) {
@@ -2735,6 +2835,7 @@ $("detailBody").addEventListener("click", function (e) {
   var book = bookById(state.detailId);
   if (!book) return;
   if (action === "close-detail") closeDetail();
+  else if (action === "open-series") openSeries(book.series_name);
   else if (action === "set-rating") {
     var v = parseFloat(t.getAttribute("data-rating"));
     if (v === 0.5 && book.rating === 0.5) saveRating(book, null);
@@ -2832,6 +2933,16 @@ $("listsBody").addEventListener("click", function (e) {
   else if (action === "picker-add") { addToList(list, Number(t.getAttribute("data-book-id"))); }
 });
 
+$("seriesBody").addEventListener("click", function (e) {
+  var t = e.target.closest("[data-action]");
+  if (!t) return;
+  var action = t.getAttribute("data-action");
+  if (action === "close-series") { closeSeries(); return; }
+  // The series overlay sits above the details dialog, so close it
+  // first: opening the book then shows its details on top.
+  if (action === "open-series-book") { var id = Number(t.getAttribute("data-book-id")); closeSeries(); openDetail(id); return; }
+});
+
 $("listsBody").addEventListener("input", function (e) {
   if (e.target.id === "pickerSearch") { listView.pickerQuery = e.target.value; renderPickerResults(); }
 });
@@ -2849,12 +2960,14 @@ document.querySelectorAll(".backdrop").forEach(function (b) {
   b.addEventListener("click", function () {
     if (b.parentElement.id === "listsOverlay") closeLists();
     else if (b.parentElement.id === "aboutOverlay") $("aboutOverlay").hidden = true;
+    else if (b.parentElement.id === "seriesOverlay") closeSeries();
   });
 });
 
 document.addEventListener("keydown", function (e) {
   if (e.key !== "Escape") return;
-  if (!$("detailOverlay").hidden) closeDetail();
+  if (!$("seriesOverlay").hidden) closeSeries();
+  else if (!$("detailOverlay").hidden) closeDetail();
   else if (!$("listsOverlay").hidden) closeLists();
   else if (!$("aboutOverlay").hidden) $("aboutOverlay").hidden = true;
   else if (!$("filtersPanel").hidden) setFiltersOpen(false);

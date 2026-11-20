@@ -3,7 +3,7 @@
 Bookshelf is the private book collection app for Randy and Lisa. It shows
 every book that has been loaded into the collection, grouped into shelves,
 with cover and spine views, star ratings, read marks, reader labels, custom
-lists, editable book details, and a link to the file in Dropbox.
+lists, series views, editable book details, and a link to the file in Dropbox.
 
 ## Views
 
@@ -19,8 +19,11 @@ out of the shelf and turns around to show its cover. Tap the cover to open
 the book's details. Tap anywhere else to put the book back on the shelf.
 The details dialog only closes with its Close button. Cover view shows the
 book covers in a grid. In a book's details, the cover sits on the left with
-the title, rating, Google rating, release date, pages, genres, publisher,
-and Read button beside it, in that order, while they fit. A section that
+the title, the series name when the book belongs to a series, rating, Google rating, release date, pages, genres, publisher,
+and Read button beside it, in that order, while they fit. Tap the series
+name to open a view of every book in the series in book-number order,
+with books that have no number at the end in release-date order; tap a
+book there to open its details. A section that
 would run past the bottom of the cover moves under it whole, so a label and
 its value never split apart. The description comes right after
 the Read button, under the cover, then the Reader and List dropdowns and
@@ -33,6 +36,12 @@ internet. Changing anything else turns automatic updates off for that
 book, and a note in the details says so, with a button to turn updates
 back on. A locked book still gets title and author changes from Dropbox
 filenames, and still leaves the library when its file leaves Dropbox.
+Series data (name and book number) comes from Hardcover, filled by
+`~/workspace/book-library-build/fill_series.py` (migration 0006), and
+is not editable in the app. Series markers that were in a title
+("Book 3", "- 09", "(Reckoners #3)") are cleaned out of the title
+when Hardcover confirms that book's series, and the Dropbox file is
+renamed to match on the next nightly check.
 
 ## Covers
 
@@ -121,7 +130,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v18`. When the app shell
+The service worker cache is named `bookshelf-v19`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v18`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v19`) and
 deploy. The new worker then clears the old cache on activation.
