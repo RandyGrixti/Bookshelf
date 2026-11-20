@@ -931,7 +931,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v16";
+const CACHE = "bookshelf-v17";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1090,6 +1090,12 @@ function pageHtml() {
   .editinput { width: 100%; box-sizing: border-box; margin: 6px 0; }
   .editarea { width: 100%; box-sizing: border-box; margin: 6px 0; resize: vertical; }
   .editfile { margin: 6px 0; }
+  .coverpaste { border: 1px dashed #4a3220; border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+  .coverpaste:focus { outline: 2px solid #d9a441; outline-offset: 1px; }
+  .coverpreview { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .coverpreview[hidden] { display: none; }
+  .coverpreview img { width: 48px; height: 72px; object-fit: cover; border-radius: 4px; border: 1px solid #4a3220; display: block; }
+  .coverpreview span { color: #c9b69a; font-size: 14px; }
   .lockednote { background: #2e2113; border: 1px solid #4a3220; border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; font-size: 14px; color: #c9b69a; }
   .lockednote .btn { margin-left: 8px; }
   .editbtns { display: flex; gap: 8px; margin: 8px 0 12px; }
@@ -1269,7 +1275,7 @@ function pageHtml() {
     <h3>Book details</h3>
     <p>Tap any book to open its details. The cover sits on the left, with the title, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, cover photo, description, release date, pages, publisher, and genres. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
     <h3>Editing details and automatic updates</h3>
-    <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
+    <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, or click the cover box and paste an image, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -1979,6 +1985,7 @@ var detailEditing = false;
 var editGenres = null;
 var genreExpanded = {};
 var genrePanelOpen = false;
+var coverPreviewUrl = null;
 
 // How many leading detail sections fit beside the cover. A section
 // that would take the column past the bottom edge of the cover moves
@@ -2055,8 +2062,12 @@ function renderDetail() {
     html += '<label class="fieldlabel" for="editAuthor">Author</label>';
     html += '<input type="text" class="editinput" id="editAuthor" maxlength="120" value="' + esc(book.author || "") + '">';
     html += '<label class="fieldlabel" for="editCover">Cover photo</label>';
+    html += '<div class="coverpaste" id="editCoverBox" tabindex="0" role="button" aria-label="Cover photo. Click here, then paste an image.">';
     html += '<input type="file" class="editfile" id="editCover" accept="image/jpeg,image/png,image/webp">';
+    html += '<div class="coverpreview" id="coverPreview" hidden><img id="coverPreviewImg" alt=""><span id="coverPreviewText">Pasted image</span></div>';
+    html += "</div>";
     html += '<p class="muted">A photo up to 5 MB. It replaces the cover and is saved in Bookshelf.</p>';
+    html += '<p class="muted">Click here, then paste an image (Ctrl+V, or right-click and Paste).</p>';
     html += '<label class="fieldlabel" for="editDescription">Description</label>';
     html += '<textarea class="editarea" id="editDescription" rows="4">' + esc(book.description || "") + '</textarea>';
     html += '<label class="fieldlabel" for="editRelease">Release date</label>';
@@ -2127,12 +2138,19 @@ function renderDetail() {
     html += "</div>";
   }
   html += "</div>";
+  // The form is rebuilt here, so drop any pasted-image preview from
+  // the old form and its object URL with it.
+  clearCoverPreview();
   $("detailBody").innerHTML = html;
   if (detailEditing) {
     if (editGenres === null) editGenres = validPickedGenres(book.genres);
     renderGenreChips();
     renderGenrePanel();
     setGenrePanel(genrePanelOpen);
+    var coverBox = $("editCoverBox");
+    if (coverBox) coverBox.addEventListener("paste", handleCoverPaste);
+    var coverInput = $("editCover");
+    if (coverInput) coverInput.addEventListener("change", handleCoverFileChange);
   }
   layoutDetail();
   var coverImg = $("detailBody").querySelector(".detailcover");
@@ -2224,6 +2242,63 @@ function removeGenre(name) {
   if (i !== -1) editGenres.splice(i, 1);
   renderGenreChips();
   renderGenrePanel();
+}
+
+// Cover paste: the cover box in the edit form is a paste target.
+// A pasted image is put into the file input through a DataTransfer,
+// so saveDetails picks it up exactly like a chosen file. A small
+// preview shows what was pasted, since a pasted image has no
+// filename for the file input to show.
+function showCoverPreview(file, label) {
+  var box = $("coverPreview");
+  var img = $("coverPreviewImg");
+  var text = $("coverPreviewText");
+  if (!box || !img) return;
+  if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
+  coverPreviewUrl = URL.createObjectURL(file);
+  img.src = coverPreviewUrl;
+  if (text) text.textContent = label;
+  box.hidden = false;
+}
+
+function clearCoverPreview() {
+  var box = $("coverPreview");
+  if (coverPreviewUrl) {
+    URL.revokeObjectURL(coverPreviewUrl);
+    coverPreviewUrl = null;
+  }
+  if (box) box.hidden = true;
+}
+
+function handleCoverPaste(ev) {
+  var items = ev.clipboardData && ev.clipboardData.items;
+  if (!items) return;
+  var file = null;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (item.type && item.type.indexOf("image/") === 0) {
+      var f = item.getAsFile();
+      if (f) { file = f; break; }
+    }
+  }
+  if (!file) {
+    showNotice("No image on the clipboard, copy an image first.", true);
+    return;
+  }
+  ev.preventDefault();
+  var coverEl = $("editCover");
+  if (!coverEl) return;
+  var dt = new DataTransfer();
+  dt.items.add(file);
+  coverEl.files = dt.files;
+  showCoverPreview(file, "Pasted image");
+}
+
+function handleCoverFileChange() {
+  var coverEl = $("editCover");
+  var file = coverEl && coverEl.files && coverEl.files[0] ? coverEl.files[0] : null;
+  if (file) showCoverPreview(file, file.name);
+  else clearCoverPreview();
 }
 
 function saveDetails(book) {
