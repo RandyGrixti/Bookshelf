@@ -44,7 +44,7 @@ Replacing a cover always makes a new key, so a stale cached copy can
 never show, and the old object is deleted. Covers are served from
 `/covers/<key>` behind the same passcode gate as everything else, with a
 one-year immutable cache. Upload a photo of a cover from the Edit form,
-or click the cover box and paste an image; it must be a JPEG, PNG, or
+or click the paste box under the cover photo and paste an image; it must be a JPEG, PNG, or
 WebP image of at most 5 MB. A pasted image shows as a small preview in
 the form before saving. Books whose
 covers have not been saved yet still show the old external cover link.
@@ -121,7 +121,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v17`. When the app shell
+The service worker cache is named `bookshelf-v18`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v17`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v18`) and
 deploy. The new worker then clears the old cache on activation.
