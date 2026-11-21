@@ -633,6 +633,17 @@ async function handleSetDetails(env, request) {
   const description = typeof body.description === "string" ? body.description.trim() : "";
   const publishedDate = typeof body.published_date === "string" ? body.published_date.trim().slice(0, 40) : "";
   const publisher = typeof body.publisher === "string" ? body.publisher.trim().slice(0, 200) : "";
+  const seriesName = typeof body.series_name === "string" ? body.series_name.trim().slice(0, 200) : "";
+  // The book number accepts decimals (1.5, 0.5 for novellas) or
+  // blank for no number. Anything else is rejected.
+  let seriesPosition = null;
+  if (body.series_position !== null && body.series_position !== undefined && String(body.series_position).trim() !== "") {
+    const sp = Number(body.series_position);
+    if (!Number.isFinite(sp) || sp < 0) {
+      return jsonResponse({ ok: false, error: "Book number must be a number of zero or more, or empty to clear it." }, 400);
+    }
+    seriesPosition = sp;
+  }
   let pageCount = null;
   if (body.page_count !== null && body.page_count !== undefined && String(body.page_count).trim() !== "") {
     const n = Number(body.page_count);
@@ -664,11 +675,13 @@ async function handleSetDetails(env, request) {
   }
   if (genres.length > 5) genres.length = 5;
   const row = await env.DB.prepare(
-    "SELECT id, title, author, filename, dropbox_path, description, published_date, page_count, publisher, genres, locked FROM books WHERE id = ?"
+    "SELECT id, title, author, filename, dropbox_path, description, published_date, page_count, publisher, genres, series_name, series_position, locked FROM books WHERE id = ?"
   ).bind(id).first();
   if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
   const newGenres = JSON.stringify(genres);
   const oldGenres = row.genres || "[]";
+  const oldSeriesName = row.series_name || "";
+  const oldSeriesPosition = (row.series_position === null || row.series_position === undefined || row.series_position === "") ? null : Number(row.series_position);
   const titleChanged = title !== row.title;
   const authorChanged = author !== (row.author || "");
   const otherChanged =
@@ -676,6 +689,8 @@ async function handleSetDetails(env, request) {
     publishedDate !== (row.published_date || "") ||
     pageCount !== row.page_count ||
     publisher !== (row.publisher || "") ||
+    seriesName !== oldSeriesName ||
+    seriesPosition !== oldSeriesPosition ||
     newGenres !== oldGenres;
   if (!titleChanged && !authorChanged && !otherChanged) {
     return jsonResponse({ ok: true });
@@ -713,6 +728,14 @@ async function handleSetDetails(env, request) {
   if (publisher !== (row.publisher || "")) {
     sets.push("publisher = ?");
     params.push(publisher);
+  }
+  if (seriesName !== oldSeriesName) {
+    sets.push("series_name = ?");
+    params.push(seriesName);
+  }
+  if (seriesPosition !== oldSeriesPosition) {
+    sets.push("series_position = ?");
+    params.push(seriesPosition);
   }
   if (newGenres !== oldGenres) {
     sets.push("genres = ?");
@@ -967,7 +990,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v20";
+const CACHE = "bookshelf-v21";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1336,7 +1359,7 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, cover photo, description, release date, pages, publisher, and genres. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
     <h3>Series</h3>
     <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p>
     <h3>Editing details and automatic updates</h3>
@@ -2128,6 +2151,10 @@ function renderDetail() {
     html += '<input type="text" class="editinput" id="editTitle" maxlength="200" value="' + esc(book.title) + '">';
     html += '<label class="fieldlabel" for="editAuthor">Author</label>';
     html += '<input type="text" class="editinput" id="editAuthor" maxlength="120" value="' + esc(book.author || "") + '">';
+    html += '<label class="fieldlabel" for="editSeries">Series name</label>';
+    html += '<input type="text" class="editinput" id="editSeries" maxlength="200" value="' + esc(book.series_name || "") + '">';
+    html += '<label class="fieldlabel" for="editSeriesPosition">Book number</label>';
+    html += '<input type="text" class="editinput" id="editSeriesPosition" inputmode="decimal" maxlength="20" value="' + (book.series_position !== null && book.series_position !== undefined && book.series_position !== "" ? esc(String(book.series_position)) : "") + '">';
     html += '<label class="fieldlabel" for="editCover">Cover photo</label>';
     html += '<input type="file" class="editfile" id="editCover" accept="image/jpeg,image/png,image/webp">';
     html += '<div class="coverpaste" id="editCoverPaste" contenteditable="plaintext-only" tabindex="0" role="textbox" aria-label="Paste a cover image here.">' + COVER_PASTE_HINT + '</div>';
@@ -2395,6 +2422,8 @@ function handleCoverFileChange() {
 function saveDetails(book) {
   var titleEl = $("editTitle");
   var authorEl = $("editAuthor");
+  var seriesEl = $("editSeries");
+  var seriesPosEl = $("editSeriesPosition");
   var descEl = $("editDescription");
   var releaseEl = $("editRelease");
   var pagesEl = $("editPages");
@@ -2406,6 +2435,8 @@ function saveDetails(book) {
     id: book.id,
     title: titleEl.value,
     author: authorEl.value,
+    series_name: seriesEl ? seriesEl.value : "",
+    series_position: seriesPosEl ? seriesPosEl.value : "",
     description: descEl ? descEl.value : "",
     published_date: releaseEl ? releaseEl.value : "",
     page_count: pagesEl ? pagesEl.value : "",

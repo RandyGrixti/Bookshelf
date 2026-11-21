@@ -28,7 +28,7 @@ would run past the bottom of the cover moves under it whole, so a label and
 its value never split apart. The description comes right after
 the Read button, under the cover, then the Reader and List dropdowns and
 the Dropbox and source links. Tap Edit beside the title to change the
-book's details: title, author, cover photo, description, release date,
+book's details: title, author, series name, book number, cover photo, description, release date,
 pages, publisher, and genres. The Google rating is pulled from the
 internet and is not editable. Changing only the title or author queues
 a rename of the Dropbox file, and the book still refreshes from the
@@ -38,7 +38,12 @@ back on. A locked book still gets title and author changes from Dropbox
 filenames, and still leaves the library when its file leaves Dropbox.
 Series data (name and book number) comes from Hardcover, filled by
 `~/workspace/book-library-build/fill_series.py` (migration 0006), and
-is not editable in the app. Series markers that were in a title
+can also be set by hand in the Edit form. Changing the series name or
+book number turns automatic updates off for that book, the same as
+changing any other field except the title or author. A series filled
+by that script is never overwritten by a later run of it: it only
+fills books whose series is still blank, so a hand-entered series
+stays put. Series markers that were in a title
 ("Book 3", "- 09", "(Reckoners #3)") are cleaned out of the title
 when Hardcover confirms that book's series, and the Dropbox file is
 renamed to match on the next nightly check.
@@ -139,7 +144,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v20`. When the app shell
+The service worker cache is named `bookshelf-v21`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v20`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v21`) and
 deploy. The new worker then clears the old cache on activation.
