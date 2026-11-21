@@ -3,6 +3,7 @@
 -- dropbox_id and enriched arrive with migration 0003
 -- locked arrives with migration 0005
 -- series_name and series_position arrive with migration 0006
+-- pending_deletes arrives with migration 0007
 -- This file is a copy of ~/workspace/bookshelf-build/migrations/0001_init.sql,
 -- kept here as the record of the live schema.
 
@@ -101,3 +102,14 @@ CREATE TABLE IF NOT EXISTS pending_renames (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_renames_book ON pending_renames(book_id);
+
+CREATE TABLE IF NOT EXISTS pending_deletes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL,
+  dropbox_id TEXT NOT NULL DEFAULT '',
+  dropbox_path TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  deleted_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_deletes_book ON pending_deletes(book_id);

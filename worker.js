@@ -748,6 +748,42 @@ async function handleSetLocked(env, request) {
   return jsonResponse({ ok: true, locked: locked });
 }
 
+// Deleting a book is two-phase, because the Worker cannot reach
+// Dropbox directly: the book leaves the library at once, and the
+// nightly sync moves its file to the review for deletion folder.
+// The local cover goes with the book, and any list or rename rows
+// for it are cleared too. Works on locked books as well: deleting
+// is not an update to pulled fields.
+async function handleDeleteBook(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const id = validId(body.id);
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const row = await env.DB.prepare(
+    "SELECT id, cover_url, dropbox_id, dropbox_path, filename FROM books WHERE id = ?"
+  ).bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  const oldKey = localCoverKey(row.cover_url);
+  if (oldKey && env.COVERS) {
+    try {
+      await env.COVERS.delete(oldKey);
+    } catch (err) {
+      // A leftover cover is harmless; the delete still goes ahead.
+    }
+  }
+  await env.DB.prepare("DELETE FROM list_items WHERE book_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM pending_renames WHERE book_id = ?").bind(id).run();
+  let queued = false;
+  if (row.dropbox_path) {
+    await env.DB.prepare(
+      "INSERT INTO pending_deletes (book_id, dropbox_id, dropbox_path, filename, deleted_at) VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))"
+    ).bind(id, row.dropbox_id || "", row.dropbox_path, row.filename || "").run();
+    queued = true;
+  }
+  await env.DB.prepare("DELETE FROM books WHERE id = ?").bind(id).run();
+  return jsonResponse({ ok: true, queued: queued });
+}
+
 async function handleCoverGet(env, key) {
   if (!/^[0-9]+-[0-9a-f]{12}\.(jpg|png|webp)$/.test(key)) {
     return new Response("Not found", { status: 404 });
@@ -931,7 +967,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v19";
+const CACHE = "bookshelf-v20";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1015,6 +1051,7 @@ function pageHtml() {
   .btn.primary { background: #d9a441; border-color: #d9a441; color: #241708; }
   .btn:disabled { opacity: .55; cursor: default; }
   .btn.small { padding: 6px 10px; font-size: 14px; }
+  .btn.danger { background: #4a1e1e; border-color: #6b2f2f; color: #f2d9d9; }
   a.btn { display: inline-block; text-decoration: none; text-align: center; }
   input[type="search"], input[type="text"], select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #4a3220; background: #241a10; color: #f2e8d5; font-size: 16px; }
   input[type="search"] { margin-bottom: 10px; }
@@ -1079,6 +1116,7 @@ function pageHtml() {
   #listsOverlay { z-index: 30; }
   #aboutOverlay { z-index: 35; }
   #seriesOverlay { z-index: 45; }
+  #deleteOverlay { z-index: 55; }
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.65); }
   .panel { position: relative; width: 100%; max-width: 640px; background: #241a10; border: 1px solid #4a3220; border-radius: 12px; padding: 16px; margin: auto 0; }
   .covercheck { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(36, 23, 8, .88); color: #8fce7a; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
@@ -1151,6 +1189,7 @@ function pageHtml() {
     .metalabel { flex: none; width: 110px; font-size: 15px; margin-bottom: 0; }
   }
   .detailactions { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .deleterow { margin-top: 4px; padding-top: 14px; border-top: 1px solid #33220f; }
   .fieldlabel { font-size: 14px; color: #c9b69a; margin-bottom: 4px; display: block; }
   .stars { position: relative; display: inline-block; font-size: 34px; line-height: 1; letter-spacing: 2px; }
   .starbg { color: #4a3220; }
@@ -1263,6 +1302,19 @@ function pageHtml() {
   </div>
 </div>
 
+<div id="deleteOverlay" class="overlay" hidden>
+  <div class="backdrop"></div>
+  <div class="panel" role="dialog" aria-modal="true" aria-label="Delete this book">
+    <div id="deleteBody">
+      <h2>Delete this book?</h2>
+      <p><span id="deleteTitle"></span></p>
+      <p>This removes the book from Bookshelf at once. Its file in Dropbox moves to the review for deletion folder at the next nightly check, so you can still get it back from there.</p>
+      <div class="editbtns"><button type="button" class="btn danger" data-action="confirm-delete-book">Delete</button>
+      <button type="button" class="btn" data-action="cancel-delete-book">Cancel</button></div>
+    </div>
+  </div>
+</div>
+
 <div id="aboutOverlay" class="overlay" hidden>
   <div class="backdrop"></div>
   <div class="panel" role="dialog" aria-modal="true" aria-label="About Bookshelf">
@@ -1289,6 +1341,8 @@ function pageHtml() {
     <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p>
     <h3>Editing details and automatic updates</h3>
     <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, or click the paste box under the cover photo and paste an image, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
+    <h3>Deleting a book</h3>
+    <p>To remove a book, open its details and tap Delete this book at the bottom. Bookshelf asks you to confirm first. The book leaves your shelves at once, and its file in Dropbox moves to the review for deletion folder at the next nightly check, so you can still get it back from there until you delete it yourself.</p>
     <h3>Star ratings</h3>
     <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
     <h3>Read marks and dates</h3>
@@ -2156,6 +2210,7 @@ function renderDetail() {
     if (src) html += '<a class="srclink" href="' + esc(src.url) + '" target="_blank" rel="noopener noreferrer">' + esc(src.label) + "</a>";
     html += "</div>";
   }
+  html += '<div class="deleterow"><button type="button" class="btn danger small" data-action="start-delete-book">Delete this book</button></div>';
   html += "</div>";
   // The form is rebuilt here, so drop any pasted-image preview from
   // the old form and its object URL with it.
@@ -2442,6 +2497,42 @@ function addDetailToList(book) {
     .then(function (data) { return refreshData().then(function () { return data; }); })
     .then(function (data) { showNotice(data && data.already ? "That book is already in " + list.name + "." : "Book added to " + list.name + "."); })
     .catch(function (err) { showNotice(err.message, true); });
+}
+
+// Deleting a book: the confirm overlay asks first, then the book
+// leaves the shelves at once and its Dropbox file is queued for the
+// nightly move to review for deletion. Closing returns to the
+// shelves, never to a stale series view.
+var deleteBookId = null;
+
+function openDeleteBook(book) {
+  deleteBookId = book.id;
+  $("deleteTitle").textContent = book.title;
+  $("deleteOverlay").hidden = false;
+}
+
+function closeDeleteBook() {
+  deleteBookId = null;
+  $("deleteOverlay").hidden = true;
+}
+
+function confirmDeleteBook() {
+  var id = deleteBookId;
+  if (!id) return;
+  postJson("/api/delete-book", { id: id }).then(function () {
+    state.books = state.books.filter(function (b) { return b.id !== id; });
+    state.lists.forEach(function (l) {
+      l.items = l.items.filter(function (bookId) { return bookId !== id; });
+    });
+    closeDeleteBook();
+    closeSeries();
+    closeDetail();
+    render();
+    showNotice("Book deleted. The file moves to review for deletion at the next nightly check.");
+  }).catch(function (err) {
+    closeDeleteBook();
+    showNotice(err.message, true);
+  });
 }
 
 // ---- Lists view ----
@@ -2836,6 +2927,7 @@ $("detailBody").addEventListener("click", function (e) {
   if (!book) return;
   if (action === "close-detail") closeDetail();
   else if (action === "open-series") openSeries(book.series_name);
+  else if (action === "start-delete-book") openDeleteBook(book);
   else if (action === "set-rating") {
     var v = parseFloat(t.getAttribute("data-rating"));
     if (v === 0.5 && book.rating === 0.5) saveRating(book, null);
@@ -2943,6 +3035,14 @@ $("seriesBody").addEventListener("click", function (e) {
   if (action === "open-series-book") { var id = Number(t.getAttribute("data-book-id")); closeSeries(); openDetail(id); return; }
 });
 
+$("deleteBody").addEventListener("click", function (e) {
+  var t = e.target.closest("[data-action]");
+  if (!t) return;
+  var action = t.getAttribute("data-action");
+  if (action === "cancel-delete-book") closeDeleteBook();
+  else if (action === "confirm-delete-book") confirmDeleteBook();
+});
+
 $("listsBody").addEventListener("input", function (e) {
   if (e.target.id === "pickerSearch") { listView.pickerQuery = e.target.value; renderPickerResults(); }
 });
@@ -2961,12 +3061,14 @@ document.querySelectorAll(".backdrop").forEach(function (b) {
     if (b.parentElement.id === "listsOverlay") closeLists();
     else if (b.parentElement.id === "aboutOverlay") $("aboutOverlay").hidden = true;
     else if (b.parentElement.id === "seriesOverlay") closeSeries();
+    else if (b.parentElement.id === "deleteOverlay") closeDeleteBook();
   });
 });
 
 document.addEventListener("keydown", function (e) {
   if (e.key !== "Escape") return;
-  if (!$("seriesOverlay").hidden) closeSeries();
+  if (!$("deleteOverlay").hidden) closeDeleteBook();
+  else if (!$("seriesOverlay").hidden) closeSeries();
   else if (!$("detailOverlay").hidden) closeDetail();
   else if (!$("listsOverlay").hidden) closeLists();
   else if (!$("aboutOverlay").hidden) $("aboutOverlay").hidden = true;
@@ -3067,6 +3169,9 @@ export default {
       }
       if (path === "/api/set-locked" && request.method === "POST") {
         return await handleSetLocked(env, request);
+      }
+      if (path === "/api/delete-book" && request.method === "POST") {
+        return await handleDeleteBook(env, request);
       }
       if (path.indexOf("/covers/") === 0 && request.method === "GET") {
         return await handleCoverGet(env, path.slice("/covers/".length));

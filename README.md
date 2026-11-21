@@ -90,13 +90,22 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
 - `lists`: named custom lists.
 - `list_items`: which books sit in which list, and in what order
   (`position`).
+- `pending_deletes`: books deleted in the app whose Dropbox file still
+  waits for the nightly move to the review for deletion folder
+  (migration 0007). Each row keeps the book id, Dropbox file id, path,
+  and filename, so the nightly sync can move the file and then clear
+  the row.
 - `device_tokens`: passcode device tokens, one per unlocked device.
 - `unlock_attempts`: failed passcode guesses, used for the rate limit.
 - `settings`: key and value settings, unused in v1.
 
 Books are loaded by an import job, not through this app. The app only
 reads books and records read marks, star ratings, reader labels, custom
-lists, and detail edits. The nightly sync refreshes a book's details
+lists, and detail edits. Deleting a book in the app removes its row at
+once and queues its Dropbox file for the nightly move to the review
+for deletion folder; the nightly sync moves the file and clears the
+queue row, and never re-adds a file that is still queued for deletion.
+The nightly sync refreshes a book's details
 from the internet when its title or author changes, but never refreshes
 a book with `locked` set; it still applies title and author changes
 from Dropbox filenames to locked books, and still removes a locked book
@@ -130,7 +139,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v19`. When the app shell
+The service worker cache is named `bookshelf-v20`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v19`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v20`) and
 deploy. The new worker then clears the old cache on activation.
