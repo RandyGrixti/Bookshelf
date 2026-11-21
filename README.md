@@ -100,6 +100,12 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
   (migration 0007). Each row keeps the book id, Dropbox file id, path,
   and filename, so the nightly sync can move the file and then clear
   the row.
+- `pending_moves`: books whose Reader changed in the app and whose
+  Dropbox file still waits for the nightly move to the matching folder
+  (migration 0008). Each row keeps the book id, target folder, Dropbox
+  file id, path, and filename, so the nightly sync can move the file
+  and then clear the row. A second Reader change replaces the queued
+  row, so the latest Reader wins.
 - `device_tokens`: passcode device tokens, one per unlocked device.
 - `unlock_attempts`: failed passcode guesses, used for the rate limit.
 - `settings`: key and value settings, unused in v1.
@@ -110,6 +116,13 @@ lists, and detail edits. Deleting a book in the app removes its row at
 once and queues its Dropbox file for the nightly move to the review
 for deletion folder; the nightly sync moves the file and clears the
 queue row, and never re-adds a file that is still queued for deletion.
+Changing a book's Reader in the app updates the label at once and
+queues its Dropbox file for the nightly move to the matching folder
+(Randy, Lisa, or All); the nightly sync moves the file, updates the
+row's path, and clears the queue row, and never treats a file still
+queued for a move as a new book. A file with the same name already
+sitting at the destination blocks the move instead of being renamed:
+the row stays queued and the nightly summary reports it.
 The nightly sync refreshes a book's details
 from the internet when its title or author changes, but never refreshes
 a book with `locked` set; it still applies title and author changes
@@ -144,7 +157,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v21`. When the app shell
+The service worker cache is named `bookshelf-v22`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v21`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v22`) and
 deploy. The new worker then clears the old cache on activation.

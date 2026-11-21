@@ -238,6 +238,16 @@ function parseJsonArray(value) {
   }
 }
 
+// The library folder a Dropbox path sits in (Randy, Lisa, or All),
+// or "" when the file is outside the three library folders.
+function dropboxFolder(path) {
+  if (!path) return "";
+  const parts = String(path).split("/").filter(function (p) { return p.length > 0; });
+  if (parts.length < 2 || parts[0] !== "books") return "";
+  if (parts[1] !== "Randy" && parts[1] !== "Lisa" && parts[1] !== "All") return "";
+  return parts[1];
+}
+
 function validId(value) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : 0;
@@ -504,12 +514,30 @@ async function handleSetReader(env, request) {
   if (reader !== "Randy" && reader !== "Lisa" && reader !== "All") {
     return jsonResponse({ ok: false, error: "Reader must be Randy, Lisa, or All." }, 400);
   }
-  const row = await env.DB.prepare("SELECT id FROM books WHERE id = ?").bind(id).first();
+  const row = await env.DB.prepare(
+    "SELECT id, reader, dropbox_id, dropbox_path, filename FROM books WHERE id = ?"
+  ).bind(id).first();
   if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  if (reader === row.reader) return jsonResponse({ ok: true, reader: reader, queued: false });
   await env.DB.prepare(
     "UPDATE books SET reader = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
   ).bind(reader, id).run();
-  return jsonResponse({ ok: true, reader: reader });
+  // The file follows the Reader at the next nightly check. The
+  // Worker cannot reach Dropbox itself, so the move is queued here
+  // and the nightly sync applies it, like pending_renames. The
+  // latest Reader wins: an earlier queued move for this book is
+  // replaced, so two quick changes move the file once. No queue row
+  // when there is no file to move, or when the file sits outside
+  // the three library folders.
+  let queued = false;
+  if (row.dropbox_path && dropboxFolder(row.dropbox_path)) {
+    await env.DB.prepare("DELETE FROM pending_moves WHERE book_id = ?").bind(id).run();
+    await env.DB.prepare(
+      "INSERT INTO pending_moves (book_id, target_folder, dropbox_id, dropbox_path, filename, queued_at) VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))"
+    ).bind(id, reader, row.dropbox_id || "", row.dropbox_path, row.filename || "").run();
+    queued = true;
+  }
+  return jsonResponse({ ok: true, reader: reader, queued: queued });
 }
 
 async function handleSetTitleAuthor(env, request) {
@@ -990,7 +1018,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v21";
+const CACHE = "bookshelf-v22";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1371,7 +1399,7 @@ function pageHtml() {
     <h3>Read marks and dates</h3>
     <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover, and as a small check on the spine in Spine view. Tap the button again to clear the mark.</p>
     <h3>Reader field</h3>
-    <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once.</p>
+    <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once. The book's file in Dropbox moves to the matching folder at the next nightly check.</p>
     <h3>Lists</h3>
     <p>The Lists button opens your own lists. Create a list with a name, then open it and use Add books to search the shelves and add books to it. In Edit mode you can move books up or down and remove them. Rename changes the name. Delete removes the list, not the books. A book can sit in as many lists as you like. In a book's details, pick a list from the List dropdown and tap + to add the book to it.</p>
     <h3>Dropbox links</h3>
