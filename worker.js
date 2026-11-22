@@ -15,8 +15,11 @@
 // inactive and the site is open, so setting the secret is what
 // switches the gate on.
 //
-// Secrets: SITE_PASSCODE is a Worker secret, never in code. No other
-// secret is needed in v1.
+// Secrets: SITE_PASSCODE is a Worker secret, never in code.
+// HARDCOVER_API_KEY and GOOGLE_BOOKS_API_KEY are optional Worker
+// secrets for the book refresh and the nightly cover fill. When
+// either is missing its source is skipped, never failed: a missing
+// secret, a 429, or no match moves on to the next source.
 
 function jsonResponse(data, status) {
   return new Response(JSON.stringify(data), {
@@ -650,6 +653,616 @@ async function handleSetCover(env, request) {
   return jsonResponse({ ok: true, cover_url: coverUrl });
 }
 
+// ---- Book refresh: Hardcover, then Google Books, then Open Library ----
+
+// The refresh lookup reuses the backfills' discipline
+// (backfill_hardcover.py, backfill_googlebooks_descriptions.py):
+// a candidate only counts when its title agrees with the stored
+// title AND at least one of its authors agrees with the stored
+// author. A wrong book's data is worse than none, so a candidate
+// that fails either check is never used. Titles and authors are
+// never invented: the refresh never writes them. Genres go through
+// the GENRE_CANONICAL whitelist, and the year guard applies to
+// published_date: an edition year that disagrees with a stored
+// year does not overwrite it. Hardcover ratings never go into
+// google_rating or ratings_count, and a 0-vote Hardcover figure
+// is never written. The Worker never writes a remote cover URL
+// into cover_url: a cover is only stored after it has been saved
+// to R2 first, through the same scheme as handleSetCover.
+
+function stripAccents(s) {
+  return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normText(s) {
+  return stripAccents(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function titleKeyNorm(t) {
+  const k = normText(t);
+  return k.indexOf("the ") === 0 ? k.slice(4) : k;
+}
+
+function stripSubtitle(t) {
+  const s = String(t || "").trim();
+  const i = s.indexOf(": ");
+  return i >= 0 ? s.slice(0, i).trim() : s;
+}
+
+function titleAgrees(stored, cand) {
+  const s = titleKeyNorm(stored), c = titleKeyNorm(cand);
+  if (!s || !c) return false;
+  if (s === c) return true;
+  if (titleKeyNorm(stripSubtitle(cand)) === s) return true;
+  if (titleKeyNorm(stripSubtitle(stored)) === c) return true;
+  return false;
+}
+
+function authorWords(a) {
+  return normText(a).split(" ").filter(function (w) { return w.length > 1; });
+}
+
+function authorCompatible(a, b) {
+  if (normText(a) === normText(b)) return true;
+  const wa = authorWords(a), wb = authorWords(b);
+  if (!wa.length || !wb.length) return false;
+  const inList = function (words, w) { return words.indexOf(w) !== -1; };
+  const waInWb = wa.every(function (w) { return inList(wb, w); });
+  const wbInWa = wb.every(function (w) { return inList(wa, w); });
+  return waInWb || wbInWa;
+}
+
+function yearOfDate(s) {
+  const m = String(s || "").match(/^(\d{4})/);
+  return m ? Number(m[1]) : null;
+}
+
+function cleanIsbn(raw) {
+  const s = String(raw || "").replace(/[^0-9Xx]/g, "");
+  return s.length === 10 || s.length === 13 ? s : "";
+}
+
+function canonicalGenres(list) {
+  const out = [];
+  (list || []).forEach(function (g) {
+    const raw = String(g || "").trim();
+    if (!raw) return;
+    const canonical = GENRE_CANONICAL[normGenreValue(raw)];
+    if (canonical && out.indexOf(canonical) === -1) out.push(canonical);
+  });
+  return out.slice(0, 5);
+}
+
+function candidateTitlesOf(title, subtitle) {
+  const titles = [];
+  const t = String(title || "").trim();
+  if (t) titles.push(t);
+  const sub = String(subtitle || "").trim();
+  if (t && sub) titles.push(t + ": " + sub);
+  return titles;
+}
+
+// Strict match for a candidate: some candidate title must agree
+// with the stored title AND at least one author must agree with
+// the stored author. A blank stored author matches only on exact
+// title equality (exactTitleOnly), the same bar as the Hardcover
+// backfill.
+function candidateMatches(row, titles, authors, exactTitleOnly) {
+  const stored = row.title || "";
+  let titleOk = false;
+  if (exactTitleOnly) {
+    titleOk = titles.some(function (t) { return titleKeyNorm(t) === titleKeyNorm(stored); });
+  } else {
+    titleOk = titles.some(function (t) { return titleAgrees(stored, t); });
+  }
+  if (!titleOk) return false;
+  const storedAuthor = row.author || "";
+  if (!storedAuthor.trim()) return exactTitleOnly;
+  return (authors || []).some(function (name) { return authorCompatible(storedAuthor, name); });
+}
+
+const HC_SEARCH_QUERY = "query($q: String!) { search(query: $q, query_type: \"Book\", per_page: 5) { results } }";
+const HC_EDITIONS_QUERY = "query($isbn13: String!) { editions(where: {isbn_13: {_eq: $isbn13}}, limit: 3) { id title isbn_13 isbn_10 pages release_date release_year publisher { name } image { url } book { id title subtitle description release_year release_date pages rating ratings_count contributions { contribution author { name } } taggings { tag { tag } } image { url } book_series { series { name } position } } } }";
+
+async function hcGraphQL(env, query, variables) {
+  if (!env.HARDCOVER_API_KEY) return null;
+  try {
+    const resp = await fetch("https://api.hardcover.app/v1/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + env.HARDCOVER_API_KEY },
+      body: JSON.stringify({ query: query, variables: variables }),
+    });
+    if (resp.status === 429) return { rateLimited: true };
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(function () { return null; });
+    if (!data || data.errors) return null;
+    return { data: data.data || {} };
+  } catch (err) {
+    return null;
+  }
+}
+
+function hcBookAuthors(book) {
+  const names = [];
+  ((book || {}).contributions || []).forEach(function (c) {
+    if ((c.contribution || "") !== "Author") return;
+    const name = (((c.author || {}).name) || "").trim();
+    if (name && names.indexOf(name) === -1) names.push(name);
+  });
+  return names;
+}
+
+function hcCandidateFromEdition(ed) {
+  const book = ed.book || {};
+  const series = (book.book_series || []).map(function (bs) {
+    return { name: ((bs.series || {}).name || ""), position: bs.position === undefined ? null : bs.position };
+  }).filter(function (s) { return s.name; });
+  return {
+    title: book.title || ed.title || "",
+    subtitle: book.subtitle || "",
+    authors: hcBookAuthors(book),
+    description: book.description || "",
+    release_year: book.release_year || null,
+    release_date: book.release_date || "",
+    pages: book.pages || null,
+    genres: ((book.taggings || []).map(function (t) { return ((t.tag || {}).tag || ""); })),
+    isbn: cleanIsbn(ed.isbn_13 || "") || cleanIsbn(ed.isbn_10 || ""),
+    edition_pages: ed.pages || null,
+    edition_release_date: ed.release_date || "",
+    edition_release_year: ed.release_year || null,
+    publisher: ((ed.publisher || {}).name || ""),
+    cover_url: ((book.image || {}).url || "") || ((ed.image || {}).url || ""),
+    series_name: series.length ? series[0].name : "",
+    series_position: series.length ? series[0].position : null,
+    hardcover_rating: book.rating === undefined ? null : book.rating,
+    hardcover_ratings_count: book.ratings_count || 0,
+    google_rating: null,
+    ratings_count: null,
+  };
+}
+
+function hcCandidateFromDoc(doc) {
+  const series = doc.series_names || [];
+  return {
+    title: doc.title || "",
+    subtitle: doc.subtitle || "",
+    authors: (doc.author_names || []).slice(),
+    description: doc.description || "",
+    release_year: doc.release_year || null,
+    release_date: doc.release_date || "",
+    pages: doc.pages || null,
+    genres: (doc.genres || []).concat(doc.tags || []),
+    isbn: (doc.isbns || []).map(function (v) { return cleanIsbn(v); }).filter(function (v) { return v.length === 13; })[0] ||
+      (doc.isbns || []).map(function (v) { return cleanIsbn(v); }).filter(function (v) { return v.length === 10; })[0] || "",
+    edition_pages: null,
+    edition_release_date: "",
+    edition_release_year: null,
+    publisher: "",
+    cover_url: ((doc.image || {}).url || ""),
+    series_name: series.length ? series[0] : "",
+    series_position: null,
+    hardcover_rating: doc.rating === undefined ? null : doc.rating,
+    hardcover_ratings_count: doc.ratings_count || 0,
+    google_rating: null,
+    ratings_count: null,
+  };
+}
+
+async function hcLookup(env, row) {
+  if (!env.HARDCOVER_API_KEY) return { candidate: null, attempted: false, completed: false };
+  const isbn = cleanIsbn(row.isbn || "");
+  if (isbn.length === 13) {
+    const ed = await hcGraphQL(env, HC_EDITIONS_QUERY, { isbn13: isbn });
+    if (ed && ed.rateLimited) return { candidate: null, attempted: true, completed: false };
+    if (ed) {
+      const editions = ed.data.editions || [];
+      for (let i = 0; i < editions.length; i++) {
+        const cand = hcCandidateFromEdition(editions[i]);
+        const titles = candidateTitlesOf(cand.title, cand.subtitle);
+        if (!titles.some(function (t) { return titleAgrees(row.title || "", t); })) continue;
+        const storedAuthor = row.author || "";
+        if (storedAuthor.trim() && !cand.authors.some(function (a) { return authorCompatible(storedAuthor, a); })) continue;
+        return { candidate: cand, attempted: true, completed: true };
+      }
+    }
+  }
+  const q = String(row.title || "").trim() + ((row.author || "").trim() ? " " + String(row.author).trim() : "");
+  const s = await hcGraphQL(env, HC_SEARCH_QUERY, { q: q });
+  if (s && s.rateLimited) return { candidate: null, attempted: true, completed: false };
+  if (!s) return { candidate: null, attempted: true, completed: false };
+  const hits = (((s.data.search || {}).results || {}).hits || []);
+  const docs = hits.map(function (h) { return (h && h.document) || {}; });
+  const blankAuthor = !(row.author || "").trim();
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const titles = candidateTitlesOf(doc.title || "", doc.subtitle || "");
+    if (!candidateMatches(row, titles, doc.author_names || [], blankAuthor)) continue;
+    return { candidate: hcCandidateFromDoc(doc), attempted: true, completed: true };
+  }
+  return { candidate: null, attempted: true, completed: true };
+}
+
+async function gbLookup(env, row) {
+  if (!env.GOOGLE_BOOKS_API_KEY) return { candidate: null, attempted: false, completed: false };
+  const q = "intitle:" + encodeURIComponent(row.title || "") +
+    ((row.author || "").trim() ? "+inauthor:" + encodeURIComponent(row.author) : "");
+  const url = "https://www.googleapis.com/books/v1/volumes?q=" + q + "&maxResults=5&key=" + encodeURIComponent(env.GOOGLE_BOOKS_API_KEY);
+  let data = null;
+  try {
+    const resp = await fetch(url, { headers: { "User-Agent": "Bookshelf/1.0 (personal library app)" } });
+    if (resp.status === 429) return { candidate: null, attempted: true, completed: false };
+    if (!resp.ok) return { candidate: null, attempted: true, completed: false };
+    data = await resp.json().catch(function () { return null; });
+  } catch (err) {
+    return { candidate: null, attempted: true, completed: false };
+  }
+  if (!data) return { candidate: null, attempted: true, completed: false };
+  const items = (data.items || []).map(function (it) { return it.volumeInfo || {}; });
+  for (let i = 0; i < items.length; i++) {
+    const info = items[i];
+    if (!candidateMatches(row, [info.title || ""], info.authors || [], false)) continue;
+    const identifiers = info.industryIdentifiers || [];
+    let isbn = "";
+    identifiers.forEach(function (x) {
+      if (x.type === "ISBN_13" && cleanIsbn(x.identifier)) isbn = cleanIsbn(x.identifier);
+    });
+    if (!isbn) {
+      identifiers.forEach(function (x) {
+        if (x.type === "ISBN_10" && cleanIsbn(x.identifier)) isbn = cleanIsbn(x.identifier);
+      });
+    }
+    const links = info.imageLinks || {};
+    return {
+      candidate: {
+        title: info.title || "",
+        subtitle: info.subtitle || "",
+        authors: (info.authors || []).slice(),
+        description: info.description || "",
+        release_year: yearOfDate(info.publishedDate || ""),
+        release_date: info.publishedDate || "",
+        pages: info.pageCount || null,
+        genres: (info.categories || []).slice(),
+        isbn: isbn,
+        edition_pages: null,
+        edition_release_date: "",
+        edition_release_year: null,
+        publisher: info.publisher || "",
+        cover_url: links.thumbnail || links.smallThumbnail || "",
+        series_name: "",
+        series_position: null,
+        hardcover_rating: null,
+        hardcover_ratings_count: null,
+        google_rating: info.averageRating === undefined ? null : info.averageRating,
+        ratings_count: info.ratingsCount === undefined ? null : info.ratingsCount,
+      },
+      attempted: true,
+      completed: true,
+    };
+  }
+  return { candidate: null, attempted: true, completed: true };
+}
+
+async function olLookup(env, row) {
+  const url = "https://openlibrary.org/search.json?title=" + encodeURIComponent(row.title || "") +
+    "&author=" + encodeURIComponent(row.author || "") + "&limit=5";
+  let data = null;
+  try {
+    const resp = await fetch(url, { headers: { "User-Agent": "Bookshelf/1.0 (personal library app)" } });
+    if (resp.status === 429) return { candidate: null, attempted: true, completed: false };
+    if (!resp.ok) return { candidate: null, attempted: true, completed: false };
+    data = await resp.json().catch(function () { return null; });
+  } catch (err) {
+    return { candidate: null, attempted: true, completed: false };
+  }
+  if (!data) return { candidate: null, attempted: true, completed: false };
+  const docs = data.docs || [];
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    if (!candidateMatches(row, [doc.title || ""], doc.author_name || [], false)) continue;
+    const isbns = doc.isbn || [];
+    let isbn = "";
+    isbns.forEach(function (v) { if (!isbn && cleanIsbn(v).length === 13) isbn = cleanIsbn(v); });
+    if (!isbn) {
+      isbns.forEach(function (v) { if (!isbn && cleanIsbn(v).length === 10) isbn = cleanIsbn(v); });
+    }
+    const firstYear = doc.first_publish_year || null;
+    return {
+      candidate: {
+        title: doc.title || "",
+        subtitle: doc.subtitle || "",
+        authors: (doc.author_name || []).slice(),
+        description: typeof doc.description === "string" ? doc.description : "",
+        release_year: firstYear,
+        release_date: firstYear ? String(firstYear) : "",
+        pages: doc.number_of_pages_median || null,
+        genres: (doc.subject || []).slice(),
+        isbn: isbn,
+        edition_pages: null,
+        edition_release_date: "",
+        edition_release_year: null,
+        publisher: (doc.publisher || [])[0] || "",
+        cover_url: doc.cover_i ? "https://covers.openlibrary.org/b/id/" + doc.cover_i + "-L.jpg" : "",
+        series_name: "",
+        series_position: null,
+        hardcover_rating: null,
+        hardcover_ratings_count: null,
+        google_rating: null,
+        ratings_count: null,
+      },
+      attempted: true,
+      completed: true,
+    };
+  }
+  return { candidate: null, attempted: true, completed: true };
+}
+
+// Lookup order is Hardcover, then Google Books, then Open Library.
+// The first source that matches supplies the pulled fields; the
+// cover comes from the first matching source that has one. A source
+// whose secret is missing, that answers 429, or that errors is
+// skipped, never fatal. Returns the matched candidate, its source,
+// the best cover URL, and whether any source completed a lookup.
+async function lookupBook(env, row) {
+  const sources = [
+    { name: "hardcover", run: hcLookup },
+    { name: "google", run: gbLookup },
+    { name: "openlibrary", run: olLookup },
+  ];
+  let candidate = null;
+  let source = null;
+  let coverUrl = "";
+  let completed = false;
+  for (let i = 0; i < sources.length; i++) {
+    let result;
+    try {
+      result = await sources[i].run(env, row);
+    } catch (err) {
+      result = { candidate: null, attempted: true, completed: false };
+    }
+    if (!result) continue;
+    if (result.completed) completed = true;
+    if (!result.candidate) continue;
+    if (!candidate) {
+      candidate = result.candidate;
+      source = sources[i].name;
+    }
+    if (!coverUrl && result.candidate.cover_url) coverUrl = result.candidate.cover_url;
+    if (candidate && coverUrl) break;
+  }
+  return { candidate: candidate, source: source, coverUrl: coverUrl, completed: completed };
+}
+
+// An explicit refresh OVERWRITES pulled fields with fresh values:
+// description, genres, published_date, year, page_count, isbn,
+// google_rating + ratings_count (Google Books only),
+// hardcover_rating + hardcover_ratings_count (Hardcover only,
+// votes above zero), series_name and series_position (Hardcover
+// when confirmed). It never touches title, author, reader, read
+// mark or date, rating, lists, or the locked flag. The year guard:
+// an edition year that disagrees with a stored year overwrites
+// neither published_date nor year. A field the candidate does not
+// carry keeps its stored value. Returns the SET pairs to write
+// and the list of field names that actually changed.
+function buildRefreshSets(row, cand, source) {
+  const sets = [];
+  const changed = [];
+  const storedYear = row.year === null || row.year === undefined || row.year === "" ? null : Number(row.year);
+  const candPub = (cand.edition_release_date || cand.release_date || "").trim();
+  const candPubYear = yearOfDate(candPub);
+  const yearGuardBlocks = storedYear !== null && candPubYear !== null && candPubYear !== storedYear;
+  if (cand.description && String(cand.description).trim() && cand.description !== (row.description || "")) {
+    sets.push(["description", cand.description.trim()]);
+    changed.push("description");
+  }
+  const genres = canonicalGenres(cand.genres || []);
+  if (genres.length) {
+    const storedGenres = JSON.stringify(parseJsonArray(row.genres));
+    if (JSON.stringify(genres) !== storedGenres) {
+      sets.push(["genres", JSON.stringify(genres)]);
+      changed.push("genres");
+    }
+  }
+  if (candPub && !yearGuardBlocks && candPub !== (row.published_date || "")) {
+    sets.push(["published_date", candPub]);
+    changed.push("published_date");
+  }
+  const candYear = cand.release_year || cand.edition_release_year || candPubYear;
+  if ((storedYear === null || storedYear === 0) && candYear) {
+    sets.push(["year", Number(candYear)]);
+    changed.push("year");
+  }
+  const pages = cand.edition_pages || cand.pages;
+  if (pages && Number(pages) !== row.page_count) {
+    sets.push(["page_count", Number(pages)]);
+    changed.push("page_count");
+  }
+  if (cand.isbn && cand.isbn !== (row.isbn || "")) {
+    sets.push(["isbn", cand.isbn]);
+    changed.push("isbn");
+  }
+  if (source === "google" && cand.google_rating !== null && cand.google_rating !== undefined) {
+    if (Number(cand.google_rating) !== row.google_rating) {
+      sets.push(["google_rating", Number(cand.google_rating)]);
+      changed.push("google_rating");
+    }
+    if (cand.ratings_count !== null && cand.ratings_count !== undefined && Number(cand.ratings_count) !== row.ratings_count) {
+      sets.push(["ratings_count", Number(cand.ratings_count)]);
+      changed.push("ratings_count");
+    }
+  }
+  if (source === "hardcover" && cand.hardcover_rating !== null && cand.hardcover_rating !== undefined &&
+      cand.hardcover_ratings_count > 0) {
+    if (Number(cand.hardcover_rating) !== row.hardcover_rating) {
+      sets.push(["hardcover_rating", Number(cand.hardcover_rating)]);
+      changed.push("hardcover_rating");
+    }
+    if (Number(cand.hardcover_ratings_count) !== row.hardcover_ratings_count) {
+      sets.push(["hardcover_ratings_count", Number(cand.hardcover_ratings_count)]);
+      changed.push("hardcover_ratings_count");
+    }
+  }
+  if (cand.series_name && cand.series_name !== (row.series_name || "")) {
+    sets.push(["series_name", cand.series_name]);
+    changed.push("series_name");
+  }
+  if (cand.series_position !== null && cand.series_position !== undefined &&
+      Number(cand.series_position) !== row.series_position) {
+    sets.push(["series_position", Number(cand.series_position)]);
+    changed.push("series_position");
+  }
+  return { sets: sets, changed: changed };
+}
+
+// Fetch a cover image from a source URL and store it in R2 with
+// the same scheme as handleSetCover. Returns the new /covers/ URL,
+// or "" when the image could not be fetched or is not a supported
+// image. A remote URL is never written to cover_url.
+async function storeCoverFromUrl(env, id, oldCoverUrl, remoteUrl) {
+  if (!env.COVERS || !remoteUrl) return "";
+  try {
+    const resp = await fetch(remoteUrl, { headers: { "User-Agent": "Bookshelf/1.0 (personal library app)" } });
+    if (!resp.ok) return "";
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    if (!bytes.length || bytes.length > MAX_COVER_BYTES) return "";
+    const ext = coverTypeFromBytes(bytes);
+    if (!ext) return "";
+    const hash = await sha256HexBytes(bytes);
+    const key = coverKey(id, hash, ext);
+    const contentType = ext === "jpg" ? "image/jpeg" : ext === "png" ? "image/png" : "image/webp";
+    await env.COVERS.put(key, bytes, { httpMetadata: { contentType: contentType } });
+    const oldKey = localCoverKey(oldCoverUrl);
+    if (oldKey && oldKey !== key) {
+      try {
+        await env.COVERS.delete(oldKey);
+      } catch (err) {
+        // A leftover copy is harmless; the row already points at the new key.
+      }
+    }
+    return "/covers/" + key;
+  } catch (err) {
+    return "";
+  }
+}
+
+async function handleRefreshBook(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const id = validId(body.id);
+  if (!id) return jsonResponse({ ok: false, error: "Bad book id." }, 400);
+  const row = await env.DB.prepare("SELECT * FROM books WHERE id = ?").bind(id).first();
+  if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
+  const lookup = await lookupBook(env, row);
+  if (!lookup.candidate) {
+    return jsonResponse({ ok: true, matched: false, changed: [], cover: false, source: null });
+  }
+  const built = buildRefreshSets(row, lookup.candidate, lookup.source);
+  const sets = built.sets.slice();
+  const params = built.sets.map(function (pair) { return pair[1]; });
+  const changed = built.changed.slice();
+  let coverChanged = false;
+  if (lookup.coverUrl) {
+    const stored = await storeCoverFromUrl(env, id, row.cover_url || "", lookup.coverUrl);
+    if (stored && stored !== (row.cover_url || "")) {
+      coverChanged = true;
+      changed.push("cover");
+      sets.push(["cover_url", stored]);
+      params.push(stored);
+    }
+  }
+  if (sets.length) {
+    const sql = "UPDATE books SET " + sets.map(function (pair) { return pair[0] + " = ?"; }).join(", ") +
+      ", updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?";
+    await env.DB.prepare(sql).bind(...params, id).run();
+  }
+  return jsonResponse({ ok: true, matched: true, changed: changed, cover: coverChanged, source: lookup.source });
+}
+
+async function handleListReorder(env, request) {
+  const body = await readJson(request);
+  if (!body || typeof body !== "object") return badBody();
+  const listId = validId(body.list_id);
+  if (!listId) return jsonResponse({ ok: false, error: "Bad list id." }, 400);
+  if (!Array.isArray(body.order)) {
+    return jsonResponse({ ok: false, error: "Give the new order as a list of book ids." }, 400);
+  }
+  const list = await env.DB.prepare("SELECT id FROM lists WHERE id = ?").bind(listId).first();
+  if (!list) return jsonResponse({ ok: false, error: "List not found." }, 404);
+  const res = await env.DB.prepare(
+    "SELECT book_id FROM list_items WHERE list_id = ? ORDER BY position ASC, book_id ASC"
+  ).bind(listId).all();
+  const current = (res.results || []).map(function (r) { return r.book_id; });
+  const order = body.order.map(function (v) { return validId(v); });
+  const sameSet = order.length === current.length &&
+    order.every(function (v) { return v !== 0 && current.indexOf(v) !== -1; }) &&
+    current.every(function (v) { return order.indexOf(v) !== -1; });
+  if (!sameSet) {
+    return jsonResponse({ ok: false, error: "The order does not match the books in the list." }, 400);
+  }
+  for (let i = 0; i < order.length; i++) {
+    await env.DB.prepare(
+      "UPDATE list_items SET position = ? WHERE list_id = ? AND book_id = ?"
+    ).bind(i, listId, order[i]).run();
+  }
+  return jsonResponse({ ok: true });
+}
+
+// Nightly cover fill: up to 20 books with no cover, oldest added
+// first, looked up in the same Hardcover, Google Books, Open
+// Library order as the immediate refresh, and stored in R2 with
+// the same scheme. Only the cover is filled here, never any other
+// field. A book whose lookup completed (a source answered, match
+// or not) is stamped with cover_checked_at, so a book with no
+// cover to be found is not retried every night. A book no source
+// could be tried for (no secrets yet, or a 429) is left unstamped
+// and tried again the next night.
+async function runCoverFill(env) {
+  if (!env.COVERS) {
+    console.log("bookshelf cover fill: no COVERS binding, nothing filled");
+    return { checked: 0, filled: 0, noCover: 0, skipped: 0 };
+  }
+  const res = await env.DB.prepare(
+    "SELECT * FROM books WHERE cover_url = ? AND cover_checked_at = ? ORDER BY added_at ASC, id ASC LIMIT ?"
+  ).bind("", "", 20).all();
+  const books = res.results || [];
+  let filled = 0;
+  let noCover = 0;
+  let skipped = 0;
+  for (let i = 0; i < books.length; i++) {
+    const row = books[i];
+    let lookup;
+    try {
+      lookup = await lookupBook(env, row);
+    } catch (err) {
+      skipped++;
+      continue;
+    }
+    if (!lookup.completed) {
+      skipped++;
+      continue;
+    }
+    let coverChanged = false;
+    if (lookup.coverUrl) {
+      const stored = await storeCoverFromUrl(env, row.id, row.cover_url || "", lookup.coverUrl);
+      if (stored) {
+        coverChanged = true;
+        await env.DB.prepare(
+          "UPDATE books SET cover_url = ?, cover_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
+        ).bind(stored, row.id).run();
+      }
+    }
+    if (coverChanged) {
+      filled++;
+    } else {
+      noCover++;
+      await env.DB.prepare(
+        "UPDATE books SET cover_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?"
+      ).bind(row.id).run();
+    }
+  }
+  console.log("bookshelf cover fill: checked=" + books.length + " filled=" + filled + " no-cover=" + noCover + " skipped=" + skipped);
+  return { checked: books.length, filled: filled, noCover: noCover, skipped: skipped };
+}
+
 async function handleSetDetails(env, request) {
   const body = await readJson(request);
   if (!body || typeof body !== "object") return badBody();
@@ -1018,7 +1631,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v22";
+const CACHE = "bookshelf-v23";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1133,6 +1746,11 @@ function pageHtml() {
   .jumpbtn:disabled { opacity: .35; cursor: default; }
   .topbtn { position: fixed; right: 14px; bottom: 16px; z-index: 20; padding: 10px 14px; border-radius: 999px; border: 1px solid #d9a441; background: #d9a441; color: #241708; font-size: 15px; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
   .topbtn[hidden] { display: none; }
+  .listpos { width: 56px; flex: none; padding: 6px 8px; border-radius: 8px; border: 1px solid #4a3220; background: #241a10; color: #f2e8d5; font-size: 15px; text-align: center; }
+  .aboutsec > h3 { cursor: pointer; }
+  .aboutsec > h3::after { content: " \\25be"; color: #c9b69a; }
+  .aboutsec.collapsed > h3::after { content: " \\25b8"; color: #c9b69a; }
+  .aboutsec.collapsed > p { display: none; }
   .btn.active { background: #d9a441; border-color: #d9a441; color: #241708; }
   .viewrow { display: flex; gap: 8px; margin-bottom: 10px; }
   .spineshelf { margin: 18px 0 6px; }
@@ -1371,43 +1989,45 @@ function pageHtml() {
   <div class="panel" role="dialog" aria-modal="true" aria-label="About Bookshelf">
     <button type="button" class="btn" id="aboutClose">Close</button>
     <h2>About Bookshelf</h2>
-    <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox.</p>
-    <h3>Views</h3>
-    <p>Bookshelf has two views, Spine and Cover. It opens on Spine view. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p>
-    <h3>Shelves</h3>
-    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p>
-    <h3>Spine view</h3>
-    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p>
-    <h3>Sorting</h3>
-    <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p>
-    <h3>Search</h3>
-    <p>The search box matches words in the title or the author name. Clear it to see all books again.</p>
-    <h3>Filters</h3>
-    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 31 genres in alphabetical order. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p>
-    <h3>Jump to and back to top</h3>
-    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
-    <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
-    <h3>Series</h3>
-    <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p>
-    <h3>Editing details and automatic updates</h3>
-    <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, or click the paste box under the cover photo and paste an image, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details.</p>
-    <h3>Deleting a book</h3>
-    <p>To remove a book, open its details and tap Delete this book at the bottom. Bookshelf asks you to confirm first. The book leaves your shelves at once, and its file in Dropbox moves to the review for deletion folder at the next nightly check, so you can still get it back from there until you delete it yourself.</p>
-    <h3>Star ratings</h3>
-    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating and the Hardcover rating. The Hardcover rating appears when the Google rating has fewer than 50 votes, so a thin rating gets a second opinion from Hardcover's readers.</p>
-    <h3>Read marks and dates</h3>
-    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover, and as a small check on the spine in Spine view. Tap the button again to clear the mark.</p>
-    <h3>Reader field</h3>
-    <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once. The book's file in Dropbox moves to the matching folder at the next nightly check.</p>
-    <h3>Lists</h3>
-    <p>The Lists button opens your own lists. Create a list with a name, then open it and use Add books to search the shelves and add books to it. In Edit mode you can move books up or down and remove them. Rename changes the name. Delete removes the list, not the books. A book can sit in as many lists as you like. In a book's details, pick a list from the List dropdown and tap + to add the book to it.</p>
-    <h3>Dropbox links</h3>
-    <p>When a book has a file in Dropbox, its details show a small Open in Dropbox button. Next to it is a link to Open Library or Google Books, whichever the book's details came from. The Dropbox link opens the file in a new tab so you can read or download it.</p>
-    <h3>Passcode</h3>
-    <p>Bookshelf asks for a passcode the first time you visit on a device. Once you enter it, the device is remembered for a year, so you only enter it once per device.</p>
-    <h3>Installing the app on a phone</h3>
-    <p>On a phone, open Bookshelf in the browser, then use the browser menu and choose Add to Home screen or Install app. It then opens full screen like any other app, with its own icon.</p>
+    <input type="search" id="aboutSearch" placeholder="Search help" aria-label="Search help">
+    <p class="muted" id="aboutNoMatch" hidden>No matches in the help.</p>
+    <p>Bookshelf is the shelf for the books in the house. It shows every book that has been loaded in, with its cover, details, and a link to the file in Dropbox. Use the search box at the top to find a topic, and tap a heading to open or close its section.</p>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Views</h3>
+    <p>Bookshelf has two views, Spine and Cover. It opens on Spine view. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Shelves</h3>
+    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Spine view</h3>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Sorting</h3>
+    <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Search</h3>
+    <p>The search box matches words in the title or the author name. Clear it to see all books again.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Filters</h3>
+    <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 31 genres in alphabetical order. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Jump to and back to top</h3>
+    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top. The Back to top button also appears in the Lists view when you have scrolled down a list.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Book details</h3>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Tap Refresh beside Edit to look the book up again on the internet and update its details and cover. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Series</h3>
+    <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Editing details and automatic updates</h3>
+    <p>Covers are saved in Bookshelf itself, so they load fast and keep working even if the site they came from takes the picture down. To change a cover, tap Edit and choose a photo from your device, or click the paste box under the cover photo and paste an image, up to 5 MB. When you change anything other than the title or author, Bookshelf stops refreshing that book's details automatically, so your changes are never overwritten. The details show a note when updates are off for a book, with a button to turn them back on. Changing only the title or author still refreshes the book's details. Books with no cover get one filled in overnight when a cover is found for them.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Deleting a book</h3>
+    <p>To remove a book, open its details and tap Delete this book at the bottom. Bookshelf asks you to confirm first. The book leaves your shelves at once, and its file in Dropbox moves to the review for deletion folder at the next nightly check, so you can still get it back from there until you delete it yourself.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Star ratings</h3>
+    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating and the Hardcover rating. The Hardcover rating appears when the Google rating has fewer than 50 votes, so a thin rating gets a second opinion from Hardcover's readers.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Read marks and dates</h3>
+    <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover, and as a small check on the spine in Spine view. Tap the button again to clear the mark.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Reader field</h3>
+    <p>The Reader dropdown in the details says who the book is for: Randy, Lisa, or All. It sits beside the word Reader. Change it and it saves at once. The book's file in Dropbox moves to the matching folder at the next nightly check.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Lists</h3>
+    <p>The Lists button opens your own lists. Create a list with a name, then open it and use Add books to search the shelves and add books to it. In Edit mode you can move books up or down and remove them. Each book shows its position number: type new numbers and tap Save order to reorder the list, and a blank or invalid number leaves that book where it was. Rename changes the name. Delete removes the list, not the books. A book can sit in as many lists as you like. In a book's details, pick a list from the List dropdown and tap + to add the book to it.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Dropbox links</h3>
+    <p>When a book has a file in Dropbox, its details show a small Open in Dropbox button. Next to it is a link to Open Library, Google Books, or Hardcover, whichever the book's details came from. The Dropbox link opens the file in a new tab so you can read or download it.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Passcode</h3>
+    <p>Bookshelf asks for a passcode the first time you visit on a device. Once you enter it, the device is remembered for a year, so you only enter it once per device.</p></section>
+    <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Installing the app on a phone</h3>
+    <p>On a phone, open Bookshelf in the browser, then use the browser menu and choose Add to Home screen or Install app. It then opens full screen like any other app, with its own icon.</p></section>
   </div>
 </div>
 
@@ -1457,12 +2077,19 @@ function dropboxUrl(path) {
 }
 
 // Link to the site the book's details came from, when that is known:
-// Open Library for books enriched there, Google Books for the few
-// that came from the Watch List. Anything else has no source link.
+// Open Library for books enriched there, Google Books for books from
+// Google Books or the Watch List, Hardcover for books enriched there
+// (linked by ISBN through Hardcover's own redirect, when one is known).
+// Anything else has no source link.
 function sourceLink(book) {
   var q = encodeURIComponent(((book.title || "") + " " + (book.author || "")).trim());
   if (book.enriched === "openlibrary") return { label: "Open Library", url: "https://openlibrary.org/search?q=" + q };
-  if (book.enriched === "watchlist") return { label: "Google Books", url: "https://books.google.com/books?q=" + q };
+  if (book.enriched === "watchlist" || book.enriched === "googlebooks") return { label: "Google Books", url: "https://books.google.com/books?q=" + q };
+  if (book.enriched === "hardcover") {
+    var isbn = String(book.isbn || "").replace(/[^0-9Xx]/g, "");
+    if (isbn) return { label: "Hardcover", url: "https://hardcover.app/edition/isbn/" + isbn };
+    return null;
+  }
   return null;
 }
 
@@ -2207,6 +2834,7 @@ function renderDetail() {
     html += "</div>";
   } else {
     html += '<div class="detailsection" data-section="title"><div class="detailtitlewrap"><h2 class="detailtitle">' + esc(book.title) + "</h2>";
+    html += '<button type="button" class="btn small" data-action="refresh-book">Refresh</button>';
     html += '<button type="button" class="btn small" data-action="edit-title-author">Edit</button></div></div>';
     html += '<div class="detailsection" data-section="author"><p class="detailauthor">' + esc(book.author || "") + "</p></div>";
     // The Series row shows only when the book belongs to a series.
@@ -2515,6 +3143,19 @@ function saveDetails(book) {
   });
 }
 
+function refreshBook(book, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Refreshing..."; }
+  postJson("/api/refresh-book", { id: book.id }).then(function (data) {
+    return refreshData().then(function () { return data; });
+  }).then(function (data) {
+    if (!data.matched) { showNotice("No match found for this book."); return; }
+    if (!data.changed || !data.changed.length) { showNotice("Already up to date."); return; }
+    showNotice("Refreshed: " + data.changed.join(", ") + ".");
+  }).catch(function (err) {
+    showNotice(err.message, true);
+  });
+}
+
 function setLocked(book, locked) {
   postJson("/api/set-locked", { id: book.id, locked: locked }).then(function () {
     return refreshData();
@@ -2645,6 +3286,9 @@ function renderLists() {
       html += "</div>";
     }
     html += '<div class="listbtns"><button type="button" class="btn small" data-action="toggle-edit">' + (listView.edit ? "Done" : "Edit") + '</button><button type="button" class="btn small" data-action="toggle-picker">' + (listView.picker ? "Hide picker" : "Add books") + "</button></div>";
+    if (listView.edit) {
+      html += '<div class="listbtns"><button type="button" class="btn small primary" data-action="save-order">Save order</button><span class="muted">Type a position number for each book, then tap Save order.</span></div>';
+    }
     if (listView.picker) {
       html += '<div class="picker"><input type="search" id="pickerSearch" placeholder="Search title or author" value="' + esc(listView.pickerQuery) + '" aria-label="Search books to add"><div id="pickerResults"></div></div>';
     }
@@ -2658,6 +3302,7 @@ function renderLists() {
       else html += '<span class="listthumb empty" aria-hidden="true"></span>';
       html += '<button type="button" class="listbooktitle" data-action="open-book" data-book-id="' + book.id + '">' + esc(book.title) + "</button>";
       if (listView.edit) {
+        html += '<input type="number" class="listpos" inputmode="numeric" min="1" value="' + (idx + 1) + '" data-book-id="' + book.id + '" aria-label="Position of ' + esc(book.title) + '">';
         html += '<button type="button" class="btn small" data-action="move-up" data-book-id="' + book.id + '"' + (idx === 0 ? " disabled" : "") + ">Up</button>";
         html += '<button type="button" class="btn small" data-action="move-down" data-book-id="' + book.id + '"' + (idx === list.items.length - 1 ? " disabled" : "") + ">Down</button>";
         html += '<button type="button" class="btn small" data-action="remove-from-list" data-book-id="' + book.id + '">Remove</button>';
@@ -2729,6 +3374,53 @@ function deleteList(list) {
 function moveInList(list, bookId, direction) {
   postJson("/api/lists/move", { list_id: list.id, book_id: bookId, direction: direction })
     .then(function () { return refreshData(); })
+    .catch(function (err) { showNotice(err.message, true); });
+}
+
+// Reorder a list by the position numbers typed in Edit mode.
+// Books with a blank or invalid number keep their old position:
+// they stay put, and the numbered books fill the remaining slots
+// in number order, stable for ties in the current order. Returns
+// the new order and how many books kept their old place.
+function orderBooksByNumbers(ids, values) {
+  var entries = ids.map(function (id, i) {
+    var raw = String(values[i] === null || values[i] === undefined ? "" : values[i]).trim();
+    var n = raw === "" ? null : Number(raw);
+    if (n === null || !Number.isFinite(n) || Math.floor(n) !== n || n < 1) return { id: id, old: i, num: null };
+    return { id: id, old: i, num: n };
+  });
+  var keptOld = entries.filter(function (e) { return e.num === null; }).length;
+  var numbered = entries.filter(function (e) { return e.num !== null; }).sort(function (a, b) {
+    return (a.num - b.num) || (a.old - b.old);
+  });
+  var out = new Array(ids.length);
+  entries.forEach(function (e) { if (e.num === null) out[e.old] = e.id; });
+  var j = 0;
+  numbered.forEach(function (e) {
+    while (out[j] !== undefined) j++;
+    out[j] = e.id;
+    j++;
+  });
+  return { order: out, keptOld: keptOld };
+}
+
+function saveListOrder(list) {
+  var inputs = document.querySelectorAll("#listsBody .listpos");
+  var ids = [];
+  var values = [];
+  inputs.forEach(function (inp) {
+    ids.push(Number(inp.getAttribute("data-book-id")));
+    values.push(inp.value);
+  });
+  if (!ids.length) return;
+  var result = orderBooksByNumbers(ids, values);
+  postJson("/api/lists/reorder", { list_id: list.id, order: result.order })
+    .then(function () { return refreshData(); })
+    .then(function () {
+      showNotice(result.keptOld
+        ? "Some numbers were blank or invalid, so those books kept their place. Order saved."
+        : "List order saved.");
+    })
     .catch(function (err) { showNotice(err.message, true); });
 }
 
@@ -2880,12 +3572,29 @@ $("jumpto").addEventListener("click", function (e) {
   }
 });
 
+// The Back to top button watches the page scroll, and the Lists
+// overlay scroll when a list is open: the overlay is its own
+// scrolling box, so the page itself does not move while it is up.
+// Tapping the button scrolls whichever one is showing back to
+// the top.
 function updateTopBtn() {
-  var y = window.scrollY || document.documentElement.scrollTop || 0;
+  var ov = $("listsOverlay");
+  var y = 0;
+  if (ov && !ov.hidden) y = ov.scrollTop || 0;
+  else y = window.scrollY || document.documentElement.scrollTop || 0;
   $("topBtn").hidden = y <= 400;
 }
 window.addEventListener("scroll", updateTopBtn);
-$("topBtn").addEventListener("click", function () { window.scrollTo({ top: 0, behavior: "smooth" }); });
+$("listsOverlay").addEventListener("scroll", updateTopBtn);
+$("topBtn").addEventListener("click", function () {
+  var ov = $("listsOverlay");
+  if (ov && !ov.hidden) {
+    if (ov.scrollTo) ov.scrollTo({ top: 0, behavior: "smooth" });
+    else ov.scrollTop = 0;
+    return;
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 $("search").addEventListener("input", function (e) { state.search = e.target.value; render(); });
 $("sortSel").addEventListener("change", function (e) { state.sort = e.target.value; render(); });
@@ -2990,6 +3699,7 @@ $("detailBody").addEventListener("click", function (e) {
   var book = bookById(state.detailId);
   if (!book) return;
   if (action === "close-detail") closeDetail();
+  else if (action === "refresh-book") refreshBook(book, t);
   else if (action === "open-series") openSeries(book.series_name);
   else if (action === "start-delete-book") openDeleteBook(book);
   else if (action === "set-rating") {
@@ -3047,7 +3757,39 @@ $("detailBody").addEventListener("change", function (e) {
 });
 
 $("listsBtn").addEventListener("click", openLists);
-$("aboutBtn").addEventListener("click", function () { $("aboutOverlay").hidden = false; });
+
+// About search and collapse: every section starts collapsed, and
+// tapping its heading opens or closes it. Searching shows only
+// the sections whose heading or text matches, opened so the match
+// is visible, with a plain note when nothing matches. Clearing
+// the search shows every section, collapsed again.
+function filterAbout(q) {
+  var query = String(q || "").trim().toLowerCase();
+  var any = false;
+  document.querySelectorAll("#aboutOverlay .aboutsec").forEach(function (sec) {
+    var show = !query || sec.textContent.toLowerCase().indexOf(query) !== -1;
+    sec.hidden = !show;
+    if (show) {
+      any = true;
+      sec.classList.toggle("collapsed", !query);
+    }
+  });
+  var note = $("aboutNoMatch");
+  if (note) note.hidden = !(query && !any);
+}
+$("aboutSearch").addEventListener("input", function (e) { filterAbout(e.target.value); });
+$("aboutOverlay").addEventListener("click", function (e) {
+  var h = e.target.closest ? e.target.closest(".abouthead") : null;
+  if (!h) return;
+  var sec = h.parentElement;
+  if (sec) sec.classList.toggle("collapsed");
+});
+$("aboutBtn").addEventListener("click", function () {
+  var s = $("aboutSearch");
+  if (s) s.value = "";
+  filterAbout("");
+  $("aboutOverlay").hidden = false;
+});
 $("aboutClose").addEventListener("click", function () { $("aboutOverlay").hidden = true; });
 
 $("listsBody").addEventListener("click", function (e) {
@@ -3085,6 +3827,7 @@ $("listsBody").addEventListener("click", function (e) {
   else if (action === "confirm-delete") { deleteList(list); }
   else if (action === "move-up") { moveInList(list, Number(t.getAttribute("data-book-id")), "up"); }
   else if (action === "move-down") { moveInList(list, Number(t.getAttribute("data-book-id")), "down"); }
+  else if (action === "save-order") { saveListOrder(list); }
   else if (action === "remove-from-list") { removeFromList(list, Number(t.getAttribute("data-book-id"))); }
   else if (action === "picker-add") { addToList(list, Number(t.getAttribute("data-book-id"))); }
 });
@@ -3231,6 +3974,9 @@ export default {
       if (path === "/api/set-cover" && request.method === "POST") {
         return await handleSetCover(env, request);
       }
+      if (path === "/api/refresh-book" && request.method === "POST") {
+        return await handleRefreshBook(env, request);
+      }
       if (path === "/api/set-locked" && request.method === "POST") {
         return await handleSetLocked(env, request);
       }
@@ -3258,6 +4004,9 @@ export default {
       if (path === "/api/lists/move" && request.method === "POST") {
         return await handleListMove(env, request);
       }
+      if (path === "/api/lists/reorder" && request.method === "POST") {
+        return await handleListReorder(env, request);
+      }
       if (path === "/manifest.json") {
         return new Response(JSON.stringify(MANIFEST), {
           headers: { "Content-Type": "application/manifest+json", "X-Robots-Tag": "noindex, nofollow" },
@@ -3282,6 +4031,17 @@ export default {
         return jsonResponse({ ok: false, error: "Something went wrong on the server." }, 500);
       }
       return new Response("Something went wrong.", { status: 500 });
+    }
+  },
+
+  // Nightly cover fill, daily 11:00 UTC (4:00 AM BC), after the
+  // 3:30 AM BC VM sync. The scheduled handler bypasses the
+  // passcode gate entirely: it never goes through the fetch router.
+  async scheduled(event, env, ctx) {
+    try {
+      await runCoverFill(env);
+    } catch (err) {
+      console.log("bookshelf cover fill failed: " + (err && err.message ? err.message : err));
     }
   },
 };

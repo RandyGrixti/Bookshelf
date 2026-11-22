@@ -29,7 +29,11 @@ its value never split apart. The description comes right after
 the Read button, under the cover, then the Reader and List dropdowns and
 the Dropbox and source links. Tap Edit beside the title to change the
 book's details: title, author, series name, book number, cover photo, description, release date,
-pages, publisher, and genres. The Google rating is pulled from the
+pages, publisher, and genres. Tap Refresh beside Edit to look the book up again on the internet
+(Hardcover first, then Google Books, then Open Library) and update its details and cover; the
+refresh overwrites the pulled fields with fresh values, never touches the title, author, reader,
+read mark, your rating, lists, or the locked flag, and works on locked books too. If no source
+has a confident match for the title and author, the refresh says so and changes nothing. The Google rating is pulled from the
 internet and is not editable. Changing only the title or author queues
 a rename of the Dropbox file, and the book still refreshes from the
 internet. Changing anything else turns automatic updates off for that
@@ -48,6 +52,13 @@ stays put. Series markers that were in a title
 when Hardcover confirms that book's series, and the Dropbox file is
 renamed to match on the next nightly check.
 
+The About button opens the help. Its search box at the top filters
+the sections to the ones that match, opening them so the match is
+visible, and every section starts closed: tap a heading to open or
+close it. The Back to top button appears at the bottom right when
+you have scrolled down the shelves, and in the Lists view too when
+you have scrolled down a list.
+
 ## Covers
 
 Covers are saved in Bookshelf itself, in the R2 bucket `bookshelf-covers`
@@ -62,6 +73,13 @@ or click the paste box under the cover photo and paste an image; it must be a JP
 WebP image of at most 5 MB. A pasted image shows as a small preview in
 the form before saving. Books whose
 covers have not been saved yet still show the old external cover link.
+A refresh saves the best cover it finds (Hardcover, then Google Books,
+then Open Library) into Bookshelf the same way, and every night at
+4:00 AM BC the Worker fills in up to 20 books that still have no cover,
+oldest added first, in the same lookup order; a book no source can find
+a cover for is not retried every night. The Worker never stores a
+remote cover link as a book's cover: a cover only counts once it has
+been saved to R2.
 The one-off move of the existing external covers into R2 is done by
 `~/workspace/book-library-build/migrate_covers_to_r2.py`, which is
 resumable, throttled, and takes its R2 credentials from environment
@@ -74,7 +92,11 @@ variables. Run it only after the bucket exists and this version is live.
   files (manifest, service worker, icon).
 - `wrangler.jsonc`: Worker config. Name `bookshelf`, D1 binding `DB`,
   database `bookshelf`, R2 binding `COVERS`, bucket `bookshelf-covers`.
-  No cron triggers in v1.
+  A daily cron trigger at 11:00 UTC (4:00 AM BC) runs the Worker's
+  scheduled handler, which fills in missing covers (see Covers).
+  Optional secrets `HARDCOVER_API_KEY` and `GOOGLE_BOOKS_API_KEY`
+  feed the refresh and the nightly cover fill; when either is missing
+  its source is skipped, never failed.
 - `schema.sql`: a copy of the live D1 schema, as applied.
 - `package.json`: private package with a `check` script that runs
   `node --check worker.js`.
@@ -87,14 +109,19 @@ All data lives in the D1 database `bookshelf` (binding `DB`).
   All), read mark (`is_read`) with the date marked (`read_on`), star
   rating, genres and formats (JSON arrays stored as text), cover URL,
   description, page count, publisher, published date, Google rating and
-  ratings count, ISBN, language, info link, Dropbox path, filename,
+  ratings count, Hardcover rating and ratings count, ISBN, language, info link, Dropbox path, filename,
   Dropbox file id (`dropbox_id`), enrichment source (`enriched`:
   `openlibrary`, `watchlist`, or empty), format, `locked` (1 when a hand
   edit has turned automatic updates off for the book, migration 0005),
-  and added/created/updated timestamps.
+  `cover_checked_at` (when the nightly cover fill last tried this book,
+  migration 0010), and added/created/updated timestamps.
 - `lists`: named custom lists.
 - `list_items`: which books sit in which list, and in what order
-  (`position`).
+  (`position`). In Edit mode each book shows its position number;
+  typing new numbers and tapping Save order reorders the list through
+  the `/api/lists/reorder` endpoint (the up and down buttons still
+  work too), and a blank or invalid number leaves that book where
+  it was.
 - `pending_deletes`: books deleted in the app whose Dropbox file still
   waits for the nightly move to the review for deletion folder
   (migration 0007). Each row keeps the book id, Dropbox file id, path,
@@ -157,7 +184,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v22`. When the app shell
+The service worker cache is named `bookshelf-v23`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v22`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v23`) and
 deploy. The new worker then clears the old cache on activation.

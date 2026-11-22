@@ -6,6 +6,7 @@
 -- pending_deletes arrives with migration 0007
 -- pending_moves arrives with migration 0008
 -- hardcover_rating and hardcover_ratings_count arrive with migration 0009
+-- cover_checked_at arrives with migration 0010
 -- This file is a copy of ~/workspace/bookshelf-build/migrations/0001_init.sql,
 -- kept here as the record of the live schema.
 
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS books (
   locked INTEGER NOT NULL DEFAULT 0,
   series_name TEXT NOT NULL DEFAULT '',
   series_position REAL,
+  cover_checked_at TEXT NOT NULL DEFAULT '',
   UNIQUE (title_key, author_key)
 );
 
