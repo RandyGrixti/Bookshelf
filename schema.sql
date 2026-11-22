@@ -5,6 +5,7 @@
 -- series_name and series_position arrive with migration 0006
 -- pending_deletes arrives with migration 0007
 -- pending_moves arrives with migration 0008
+-- hardcover_rating and hardcover_ratings_count arrive with migration 0009
 -- This file is a copy of ~/workspace/bookshelf-build/migrations/0001_init.sql,
 -- kept here as the record of the live schema.
 
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS books (
   published_date TEXT NOT NULL DEFAULT '',
   google_rating REAL,
   ratings_count INTEGER,
+  hardcover_rating REAL,
+  hardcover_ratings_count INTEGER,
   isbn TEXT NOT NULL DEFAULT '',
   language TEXT NOT NULL DEFAULT '',
   info_link TEXT NOT NULL DEFAULT '',

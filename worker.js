@@ -1387,7 +1387,7 @@ function pageHtml() {
     <h3>Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top.</p>
     <h3>Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p>
     <h3>Series</h3>
     <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p>
     <h3>Editing details and automatic updates</h3>
@@ -1395,7 +1395,7 @@ function pageHtml() {
     <h3>Deleting a book</h3>
     <p>To remove a book, open its details and tap Delete this book at the bottom. Bookshelf asks you to confirm first. The book leaves your shelves at once, and its file in Dropbox moves to the review for deletion folder at the next nightly check, so you can still get it back from there until you delete it yourself.</p>
     <h3>Star ratings</h3>
-    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating.</p>
+    <p>In the details, tap the stars to give a book your own rating, from half a star to five stars in half star steps. Tap the first half star again to remove your rating. Your rating is separate from the Google rating and the Hardcover rating. The Hardcover rating appears when the Google rating has fewer than 50 votes, so a thin rating gets a second opinion from Hardcover's readers.</p>
     <h3>Read marks and dates</h3>
     <p>The Read button in the details marks a book as read and remembers the date it was marked. A check mark means you have read the book. It shows as a small badge on the cover, and as a small check on the spine in Spine view. Tap the button again to clear the mark.</p>
     <h3>Reader field</h3>
@@ -2226,6 +2226,11 @@ function renderDetail() {
     var g = formatRating(book.google_rating);
     if (book.ratings_count) g += " (" + Number(book.ratings_count).toLocaleString("en-US") + ")";
     html += '<div class="detailsection" data-section="google">' + metaRow("Google rating", g) + "</div>";
+  }
+  if (book.hardcover_rating !== null && book.hardcover_rating !== undefined) {
+    var h = formatRating(book.hardcover_rating);
+    if (book.hardcover_ratings_count) h += " (" + Number(book.hardcover_ratings_count).toLocaleString("en-US") + ")";
+    html += '<div class="detailsection" data-section="hardcover">' + metaRow("Hardcover rating", h) + "</div>";
   }
   var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
   if (rel) html += '<div class="detailsection" data-section="release">' + metaRow("Release date", rel) + "</div>";
