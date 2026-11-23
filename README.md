@@ -19,7 +19,7 @@ out of the shelf and turns around to show its cover. Tap the cover to open
 the book's details. Tap anywhere else to put the book back on the shelf.
 The details dialog only closes with its Close button. Cover view shows the
 book covers in a grid. In a book's details, the cover sits on the left with
-the title, the series name when the book belongs to a series, rating, Google rating, release date, pages, genres, publisher,
+the title, the series name when the book belongs to a series, rating, Google rating, release date, year when a full date is also known, pages, genres, publisher, ISBN when one is known, and language when one is known,
 and Read button beside it, in that order, while they fit. Tap the series
 name to open a view of every book in the series in book-number order,
 with books that have no number at the end in release-date order; tap a
@@ -29,7 +29,7 @@ its value never split apart. The description comes right after
 the Read button, under the cover, then the Reader and List dropdowns and
 the Dropbox and source links. Tap Edit beside the title to change the
 book's details: title, author, series name, book number, cover photo, description, release date,
-pages, publisher, and genres. Tap Refresh beside Edit to look the book up again on the internet
+year, pages, publisher, ISBN, language, and genres. Tap Refresh beside Edit to look the book up again on the internet
 (Hardcover first, then Google Books, then Open Library) and update its details and cover; the
 refresh overwrites the pulled fields with fresh values, never touches the title, author, reader,
 read mark, your rating, lists, or the locked flag, and works on locked books too. If no source
@@ -184,7 +184,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v23`. When the app shell
+The service worker cache is named `bookshelf-v24`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v23`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v25`) and
 deploy. The new worker then clears the old cache on activation.

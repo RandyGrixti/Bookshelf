@@ -722,6 +722,28 @@ function cleanIsbn(raw) {
   return s.length === 10 || s.length === 13 ? s : "";
 }
 
+// Languages are stored as three-letter codes (eng, fre, spa) from the
+// lookups. The map gives the display name; anything not in it is shown
+// as typed. A name or a code matches case-insensitively when saving.
+const LANGUAGE_NAMES = {
+  eng: "English", fre: "French", spa: "Spanish", ger: "German",
+  tur: "Turkish", por: "Portuguese", pol: "Polish", ita: "Italian",
+  chi: "Chinese", cat: "Catalan", rus: "Russian", heb: "Hebrew",
+  dut: "Dutch", rum: "Romanian", jpn: "Japanese", syc: "Syriac"
+};
+const LANGUAGE_CODES = {};
+Object.keys(LANGUAGE_NAMES).forEach(function (code) {
+  LANGUAGE_CODES[code] = code;
+  LANGUAGE_CODES[LANGUAGE_NAMES[code].toLowerCase()] = code;
+});
+function languageCodeOf(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const known = LANGUAGE_CODES[raw.toLowerCase()];
+  if (known) return known;
+  return raw.slice(0, 40);
+}
+
 function canonicalGenres(list) {
   const out = [];
   (list || []).forEach(function (g) {
@@ -1293,6 +1315,34 @@ async function handleSetDetails(env, request) {
     }
     pageCount = n;
   }
+  // Year, ISBN and Language are only touched when the save sends
+  // them: an older page that does not know these fields must not
+  // wipe them. Empty clears the field, otherwise the value is
+  // validated. Year must be a whole number from 1000 to 2100.
+  const hasYear = body.year !== null && body.year !== undefined;
+  let year = null;
+  if (hasYear && String(body.year).trim() !== "") {
+    const y = Number(body.year);
+    if (!Number.isInteger(y) || y < 1000 || y > 2100) {
+      return jsonResponse({ ok: false, error: "Year must be a whole number from 1000 to 2100, or empty to clear it." }, 400);
+    }
+    year = y;
+  }
+  // ISBN: empty clears it, otherwise 10 or 13 digits after stripping
+  // dashes and spaces, with an X allowed as a check digit.
+  const hasIsbn = typeof body.isbn === "string";
+  let isbn = "";
+  if (hasIsbn && body.isbn.trim() !== "") {
+    const cleaned = cleanIsbn(body.isbn);
+    if (!cleaned) {
+      return jsonResponse({ ok: false, error: "ISBN must be 10 or 13 digits, or empty to clear it." }, 400);
+    }
+    isbn = cleaned;
+  }
+  // Language: a known name or code becomes its three-letter code,
+  // anything else is stored as typed, trimmed, at most 40 chars.
+  const hasLanguage = body.language !== null && body.language !== undefined;
+  const language = hasLanguage ? languageCodeOf(body.language) : "";
   // Genres: a comma separated string or an array. Each value must
   // match the genre table (either column); the stored spelling is
   // the table's, and anything else is rejected, naming the bad value.
@@ -1316,13 +1366,17 @@ async function handleSetDetails(env, request) {
   }
   if (genres.length > 5) genres.length = 5;
   const row = await env.DB.prepare(
-    "SELECT id, title, author, filename, dropbox_path, description, published_date, page_count, publisher, genres, series_name, series_position, locked FROM books WHERE id = ?"
+    "SELECT id, title, author, filename, dropbox_path, description, published_date, page_count, publisher, genres, series_name, series_position, year, isbn, language, locked FROM books WHERE id = ?"
   ).bind(id).first();
   if (!row) return jsonResponse({ ok: false, error: "Book not found." }, 404);
   const newGenres = JSON.stringify(genres);
   const oldGenres = row.genres || "[]";
   const oldSeriesName = row.series_name || "";
   const oldSeriesPosition = (row.series_position === null || row.series_position === undefined || row.series_position === "") ? null : Number(row.series_position);
+  const oldYear = (row.year === null || row.year === undefined || row.year === "") ? null : Number(row.year);
+  const yearChanged = hasYear && year !== oldYear;
+  const isbnChanged = hasIsbn && isbn !== (row.isbn || "");
+  const languageChanged = hasLanguage && language !== (row.language || "");
   const titleChanged = title !== row.title;
   const authorChanged = author !== (row.author || "");
   const otherChanged =
@@ -1332,6 +1386,9 @@ async function handleSetDetails(env, request) {
     publisher !== (row.publisher || "") ||
     seriesName !== oldSeriesName ||
     seriesPosition !== oldSeriesPosition ||
+    yearChanged ||
+    isbnChanged ||
+    languageChanged ||
     newGenres !== oldGenres;
   if (!titleChanged && !authorChanged && !otherChanged) {
     return jsonResponse({ ok: true });
@@ -1370,6 +1427,18 @@ async function handleSetDetails(env, request) {
     sets.push("publisher = ?");
     params.push(publisher);
   }
+  if (yearChanged) {
+    sets.push("year = ?");
+    params.push(year);
+  }
+  if (isbnChanged) {
+    sets.push("isbn = ?");
+    params.push(isbn);
+  }
+  if (languageChanged) {
+    sets.push("language = ?");
+    params.push(language);
+  }
   if (seriesName !== oldSeriesName) {
     sets.push("series_name = ?");
     params.push(seriesName);
@@ -1395,7 +1464,7 @@ async function handleSetDetails(env, request) {
       "INSERT INTO pending_renames (book_id, old_path, new_filename, created_at) VALUES (?, ?, ?, datetime('now'))"
     ).bind(id, row.dropbox_path, newFilename).run();
   }
-  return jsonResponse({ ok: true, new_filename: newFilename, locked: otherChanged ? 1 : (row.locked ? 1 : 0) });
+  return jsonResponse({ ok: true, new_filename: newFilename, locked: otherChanged ? 1 : (row.locked ? 1 : 0), year: hasYear ? year : oldYear, isbn: hasIsbn ? isbn : (row.isbn || ""), language: hasLanguage ? language : (row.language || "") });
 }
 
 async function handleSetLocked(env, request) {
@@ -1631,7 +1700,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v23";
+const CACHE = "bookshelf-v24";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -2007,7 +2076,7 @@ function pageHtml() {
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Jump to and back to top</h3>
     <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top. The Back to top button also appears in the Lists view when you have scrolled down a list.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Book details</h3>
-    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, pages, genres, and publisher beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, pages, publisher, and genres. Tap Refresh beside Edit to look the book up again on the internet and update its details and cover. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p></section>
+    <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, year when a full date is also known, pages, genres, publisher, ISBN when one is known, and language when one is known beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, year, pages, publisher, ISBN, language, and genres. Tap Refresh beside Edit to look the book up again on the internet and update its details and cover. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Series</h3>
     <p>When a book belongs to a series, its details show the series name beside the word Series, with the book number after it when one is known. Tap the series name to see every book in the series in book-number order, with books that have no number at the end in release-date order. Tap a book there to open its details. Books that are not in a series show no Series row.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Editing details and automatic updates</h3>
@@ -2067,6 +2136,20 @@ function safeCover(url) {
   // key of book id, hash, and extension.
   if (/^\\/covers\\/[0-9]+-[0-9a-f]{12}\\.(jpg|png|webp)$/.test(u)) return u;
   return "";
+}
+
+// Languages are stored as three-letter codes; the map gives the
+// display name, and a code with no name shows as-is.
+var LANGUAGE_NAMES = {
+  eng: "English", fre: "French", spa: "Spanish", ger: "German",
+  tur: "Turkish", por: "Portuguese", pol: "Polish", ita: "Italian",
+  chi: "Chinese", cat: "Catalan", rus: "Russian", heb: "Hebrew",
+  dut: "Dutch", rum: "Romanian", jpn: "Japanese", syc: "Syriac"
+};
+function languageName(code) {
+  var c = String(code || "").trim().toLowerCase();
+  if (!c) return "";
+  return LANGUAGE_NAMES[c] || String(code || "").trim();
 }
 
 function dropboxUrl(path) {
@@ -2819,10 +2902,16 @@ function renderDetail() {
     html += '<textarea class="editarea" id="editDescription" rows="4">' + esc(book.description || "") + '</textarea>';
     html += '<label class="fieldlabel" for="editRelease">Release date</label>';
     html += '<input type="text" class="editinput" id="editRelease" maxlength="40" value="' + esc(releaseValue) + '">';
+    html += '<label class="fieldlabel" for="editYear">Year</label>';
+    html += '<input type="number" class="editinput" id="editYear" min="1000" max="2100" step="1" value="' + (book.year ? String(book.year) : "") + '">';
     html += '<label class="fieldlabel" for="editPages">Pages</label>';
     html += '<input type="number" class="editinput" id="editPages" min="1" step="1" value="' + (book.page_count ? String(book.page_count) : "") + '">';
     html += '<label class="fieldlabel" for="editPublisher">Publisher</label>';
     html += '<input type="text" class="editinput" id="editPublisher" maxlength="200" value="' + esc(book.publisher || "") + '">';
+    html += '<label class="fieldlabel" for="editIsbn">ISBN</label>';
+    html += '<input type="text" class="editinput" id="editIsbn" maxlength="20" value="' + esc(book.isbn || "") + '">';
+    html += '<label class="fieldlabel" for="editLanguage">Language</label>';
+    html += '<input type="text" class="editinput" id="editLanguage" maxlength="40" value="' + esc(languageName(book.language || "")) + '">';
     html += '<label class="fieldlabel" id="editGenresLabel">Genres</label>';
     html += '<div class="genrepicker" id="editGenres">';
     html += '<div class="genrefield" id="genreField" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-labelledby="editGenresLabel"><span class="genrechips" id="genreChips"></span><span class="genrefieldhint" id="genreFieldHint">Pick genres</span><span class="genrechev" aria-hidden="true">&#9662;</span></div>';
@@ -2862,9 +2951,14 @@ function renderDetail() {
   }
   var rel = String(book.published_date || "").trim() || (book.year ? String(book.year) : "");
   if (rel) html += '<div class="detailsection" data-section="release">' + metaRow("Release date", rel) + "</div>";
+  // The Year row only shows when a full date is known too: with no
+  // published date the Release date row already shows the year.
+  if (book.year && String(book.published_date || "").trim()) html += '<div class="detailsection" data-section="year">' + metaRow("Year", String(book.year)) + "</div>";
   if (book.page_count) html += '<div class="detailsection" data-section="pages">' + metaRow("Pages", String(book.page_count)) + "</div>";
   if (book.genres && book.genres.length) html += '<div class="detailsection" data-section="genres">' + metaRow("Genres", book.genres.join(", ")) + "</div>";
   if (book.publisher) html += '<div class="detailsection" data-section="publisher">' + metaRow("Publisher", book.publisher) + "</div>";
+  if (book.isbn) html += '<div class="detailsection" data-section="isbn">' + metaRow("ISBN", String(book.isbn)) + "</div>";
+  if (book.language) html += '<div class="detailsection" data-section="language">' + metaRow("Language", languageName(book.language)) + "</div>";
   html += "</div>";
   html += "</div>";
   html += '<div class="detailunder"></div>';
@@ -3087,8 +3181,11 @@ function saveDetails(book) {
   var seriesPosEl = $("editSeriesPosition");
   var descEl = $("editDescription");
   var releaseEl = $("editRelease");
+  var yearEl = $("editYear");
   var pagesEl = $("editPages");
   var publisherEl = $("editPublisher");
+  var isbnEl = $("editIsbn");
+  var languageEl = $("editLanguage");
   var coverEl = $("editCover");
   if (!titleEl || !authorEl) return;
   if (editGenres === null) editGenres = validPickedGenres(book.genres);
@@ -3100,8 +3197,11 @@ function saveDetails(book) {
     series_position: seriesPosEl ? seriesPosEl.value : "",
     description: descEl ? descEl.value : "",
     published_date: releaseEl ? releaseEl.value : "",
+    year: yearEl ? yearEl.value : "",
     page_count: pagesEl ? pagesEl.value : "",
     publisher: publisherEl ? publisherEl.value : "",
+    isbn: isbnEl ? isbnEl.value : "",
+    language: languageEl ? languageEl.value : "",
     genres: editGenres.join(", ")
   };
   var coverFile = coverEl && coverEl.files && coverEl.files[0] ? coverEl.files[0] : null;
@@ -3742,7 +3842,7 @@ $("detailBody").addEventListener("keydown", function (e) {
     setGenrePanel(!genrePanelOpen);
     return;
   }
-  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor" || e.target.id === "editRelease" || e.target.id === "editPages" || e.target.id === "editPublisher")) {
+  if (e.key === "Enter" && (e.target.id === "editTitle" || e.target.id === "editAuthor" || e.target.id === "editRelease" || e.target.id === "editYear" || e.target.id === "editPages" || e.target.id === "editPublisher" || e.target.id === "editIsbn" || e.target.id === "editLanguage")) {
     e.preventDefault();
     var book = bookById(state.detailId);
     if (book) saveDetails(book);
