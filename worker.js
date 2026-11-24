@@ -1700,7 +1700,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v25";
+const CACHE = "bookshelf-v26";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -1827,9 +1827,13 @@ function pageHtml() {
   .spinebody { border: 1px solid #3a2413; background: #20150c; padding: 10px 0 0; overflow: hidden; }
   .spinerow { display: flex; gap: 2px; align-items: flex-end; }
   .spine { position: relative; width: 36px; flex: none; border: 1px solid rgba(0,0,0,.45); border-radius: 3px 3px 0 0; padding: 3px 0; overflow: hidden; }
+  .spinepat-bands { background-image: linear-gradient(to bottom, transparent 10px, rgba(232,201,106,.9) 10px, rgba(232,201,106,.9) 12px, transparent 12px), linear-gradient(to bottom, transparent calc(100% - 16px), rgba(232,201,106,.9) calc(100% - 16px), rgba(232,201,106,.9) calc(100% - 14px), transparent calc(100% - 14px)); }
+  .spinepat-chevrons { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.20) 0 5px, transparent 5px 11px); }
+  .spinepat-dots { background-image: radial-gradient(rgba(255,255,255,.28) 1.3px, transparent 1.4px); background-size: 9px 9px; }
+  .spinepat-twotone { background-image: linear-gradient(to bottom, rgba(255,255,255,.22) 0 34%, transparent 34%); }
   .spinetext { writing-mode: vertical-rl; text-orientation: mixed; display: block; height: 100%; overflow: hidden; }
-  .spinetitle { display: block; font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; margin-left: 3px; }
-  .spineauthor { display: block; font-size: 11px; color: #e8d3ac; white-space: nowrap; }
+  .spinetitle { display: block; font-size: 13px; font-weight: 700; color: #f7ecd7; white-space: nowrap; margin-left: 3px; text-shadow: 0 1px 2px rgba(0,0,0,.65); }
+  .spineauthor { display: block; font-size: 11px; color: #e8d3ac; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,.65); }
   .spinecheck { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 16px; height: 16px; border-radius: 50%; background: rgba(36, 23, 8, .9); color: #8fce7a; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 1px solid #8fce7a; }
   .flipoverlay { position: fixed; inset: 0; z-index: 38; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
   .flipoverlay[hidden] { display: none; }
@@ -2066,7 +2070,7 @@ function pageHtml() {
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Shelves</h3>
     <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title's first significant word, ignoring A, An, and The at the start. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Spine view</h3>
-    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example AB - AL. The range follows the sort you picked. The labels are short, two to four letters from the first significant word, spelling the word out and reaching into the next word when titles share a word, as in STAR T - STAR W. A shelf filled by one series shows the series name and its book numbers instead. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p></section>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each spine also carries one of four designs, gold bands, chevrons, dots, or a two-tone top, picked per book and kept the same every time you open the app. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example AB - AL. The range follows the sort you picked. The labels are short, two to four letters from the first significant word, spelling the word out and reaching into the next word when titles share a word, as in STAR T - STAR W. A shelf filled by one series shows the series name and its book numbers instead. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Sorting</h3>
     <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading A, An, or The, reads a leading number as words, so 1984 files under N, and ignores punctuation, so Don't files as Dont. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Search</h3>
@@ -2621,9 +2625,28 @@ function spineColor(book) { return SPINE_COLORS[spineHash(book) % SPINE_COLORS.l
 
 function spineHeight(book) { return 150 + (spineHash(book) % 31); }
 
+var SPINE_DESIGNS = ["bands", "chevrons", "dots", "twotone"];
+
+// One design per book, from the book id so it survives title and
+// author edits and reloads. The id is scrambled with a Knuth
+// multiplicative hash and read from the high bits, so sequential ids
+// do not come out in a repeating cycle along the shelf. A book with
+// no id falls back to the title hash, the same key as its colour.
+function spineDesign(book) {
+  var id = book ? book.id : null;
+  var h;
+  if (id === undefined || id === null || id === "") {
+    h = spineHash(book);
+  } else {
+    h = (Math.floor(Number(id)) * 2654435761) >>> 0;
+    h = h >>> 16;
+  }
+  return SPINE_DESIGNS[h % SPINE_DESIGNS.length];
+}
+
 function spineBoxHtml(book, width) {
   var w = width ? ";width:" + width.toFixed(3) + "px" : "";
-  var html = '<button type="button" class="spine" data-book-id="' + book.id + '" style="background:' + spineColor(book) + ";height:" + spineHeight(book) + "px" + w + '" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
+  var html = '<button type="button" class="spine spinepat-' + spineDesign(book) + '" data-book-id="' + book.id + '" style="background-color:' + spineColor(book) + ";height:" + spineHeight(book) + "px" + w + '" aria-label="' + esc(book.title) + " by " + esc(book.author || "") + '">';
   html += '<span class="spinetext"><span class="spinetitle">' + esc(book.title) + '</span><span class="spineauthor">' + esc(book.author || "") + "</span></span>";
   if (book.is_read) html += '<span class="spinecheck" aria-label="Read">&#10003;</span>';
   html += "</button>";
@@ -3842,7 +3865,7 @@ function openFlip(id) {
   }
   if (book.is_read) html += '<span class="covercheck" aria-label="Read">&#10003;</span>';
   html += "</button>";
-  html += '<div class="flipface flipback" style="background:' + spineColor(book) + '">';
+  html += '<div class="flipface flipback spinepat-' + spineDesign(book) + '" style="background-color:' + spineColor(book) + '">';
   html += '<span class="spinetext"><span class="spinetitle">' + esc(book.title) + '</span><span class="spineauthor">' + esc(book.author || "") + "</span></span>";
   html += "</div>";
   $("flipCard").innerHTML = html;
