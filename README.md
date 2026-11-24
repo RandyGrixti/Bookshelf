@@ -12,9 +12,13 @@ shelves of spines, like books on a real shelf, with a brass plaque in the
 middle at the top of each shelf showing the first and last books on it. Each
 spine shows the title and author on two lines. The spines on a shelf share
 its width exactly, so a full shelf has no empty space at the end. The
-plaque range follows the sort: letters for title, author and genre sorts,
-with two or three letters when the shelf boundary needs them, and the year
-range for release date and date added sorts. Tap a spine and the book slides
+plaque range follows the sort: short labels of two to four letters
+from the first significant word for title, author and genre sorts,
+with the word spelled out and the next word used when titles share
+a word, and a shelf filled by one series shows the series name and
+its book numbers instead. Title sorting ignores a leading A, An, or
+The, reads a leading number as words, and ignores punctuation. The
+year range is shown for release date and date added sorts. Tap a spine and the book slides
 out of the shelf and turns around to show its cover. Tap the cover to open
 the book's details. Tap anywhere else to put the book back on the shelf.
 The details dialog only closes with its Close button. Cover view shows the
@@ -184,7 +188,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v24`. When the app shell
+The service worker cache is named `bookshelf-v25`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
-the `CACHE` constant in `worker.js` (for example to `bookshelf-v25`) and
+the `CACHE` constant in `worker.js` (for example to `bookshelf-v26`) and
 deploy. The new worker then clears the old cache on activation.

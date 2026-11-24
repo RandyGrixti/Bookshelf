@@ -1700,7 +1700,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v24";
+const CACHE = "bookshelf-v25";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -2064,17 +2064,17 @@ function pageHtml() {
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Views</h3>
     <p>Bookshelf has two views, Spine and Cover. It opens on Spine view. Use the Spine and Cover buttons under Lists and About to switch. Bookshelf shows the book covers in a grid in Cover view. A book with no cover shows its title and author inside its box instead. Tap any cover to open the book.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Shelves</h3>
-    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p></section>
+    <p>Books are grouped into shelves. Each shelf has a heading and a count. What the shelves group by depends on the sort you pick. Sorting by author groups books by the first letter of the author name, the same as sorting by title groups by the first letter of the title's first significant word, ignoring A, An, and The at the start. In Spine view the shelves are packed with spines instead, and each shelf has a plaque showing the range of books on it.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Spine view</h3>
-    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example A to Bi. The range follows the sort you picked. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p></section>
+    <p>Spine view shows the books as shelves of spines, like books on a real shelf. Each spine shows the title and author on two lines. Each shelf is packed full, with the spines sharing its width exactly so no space is left at the end. A brass plaque in the middle at the top of the shelf shows the first and last books on it, for example AB - AL. The range follows the sort you picked. The labels are short, two to four letters from the first significant word, spelling the word out and reaching into the next word when titles share a word, as in STAR T - STAR W. A shelf filled by one series shows the series name and its book numbers instead. Tap a spine and the book slides out of the shelf and turns around to show its cover. Tap the cover to open the book's details. Tap anywhere else to put the book back on the shelf.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Sorting</h3>
-    <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading The. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p></section>
+    <p>The Sort box in the Filters popup offers Title, Author (last name), Author (first name), Genre, Release date, and Date added. Title sorting ignores a leading A, An, or The, reads a leading number as words, so 1984 files under N, and ignores punctuation, so Don't files as Dont. Author (last name) sorts by the last word of the author name. Genre sorting uses the first genre listed for a book, and each book sits on one shelf only. Release date uses the published date, or the year when no full date is known. Date added uses the day the book was added. The Ascending and Descending button flips the order.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Search</h3>
     <p>The search box matches words in the title or the author name. Clear it to see all books again.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Filters</h3>
     <p>The search box stays on the page. Tap Filters to open the rest of the controls: Sort, Ascending and Descending, the All, Randy, and Lisa reader buttons, the Genre box, and the Read box. Tap Filters again, tap Close, or tap outside the box to close it. Randy shows books marked for Randy and books marked for All. Lisa shows books marked for Lisa and books marked for All. The Genre box lists 31 genres in alphabetical order. Picking one narrows the shelves to books in that genre and its subgenres, so Fiction includes Historical Fiction, Classics, and Magical Realism. The Read box shows all books, only books marked Read, or only books not yet read.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Jump to and back to top</h3>
-    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top. The Back to top button also appears in the Lists view when you have scrolled down a list.</p></section>
+    <p>The jump-to row under the search box has the letters A to Z and a hash for the rest. Tap a letter to jump to the books starting with that letter. It works in both views. The letters follow the sort, so a book starting with A, An, or The sits under the letter of its first significant word. When you have scrolled down the page, a Back to top button appears at the bottom right. Tap it to go back to the top. The Back to top button also appears in the Lists view when you have scrolled down a list.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Book details</h3>
     <p>Tap any book to open its details. The cover sits on the left, with the title, the series name when the book belongs to a series, your rating with the Read button beside the stars, the Google rating with its number of ratings in brackets when one is known, the Hardcover rating with its number of ratings in brackets when one is known, release date, year when a full date is also known, pages, genres, publisher, ISBN when one is known, and language when one is known beside it, in that order, while they fit. A section that would run past the bottom of the cover moves under the cover whole, with the sections after it, so a label and its value never split apart. The description comes right after the last field, under the cover. Then come the Reader dropdown, the List dropdown with its + button, and the Dropbox and source links. Tap Edit beside the title to change the book's details: the title, author, series name, book number, cover photo, description, release date, year, pages, publisher, ISBN, language, and genres. Tap Refresh beside Edit to look the book up again on the internet and update its details and cover. Changing the series name or book number turns automatic updates off for the book, the same as changing any other field except the title or author. Saving updates the book at once, and the Dropbox file is renamed to match on the next nightly check when the title or author changed. Tap Close to go back to the shelves.</p></section>
     <section class="aboutsec collapsed" data-about-section><h3 class="abouthead">Series</h3>
@@ -2176,9 +2176,58 @@ function sourceLink(book) {
   return null;
 }
 
+// Spelling out a leading number the way it is usually said, so
+// numbers file with the words: 1984 reads as nineteen eighty-four,
+// 2001 as two thousand one, 1491 as fourteen ninety-one, and 1004
+// as ten oh four. Four-digit years read in pairs, except 2000 to
+// 2009 which read as two thousand. Anything with no sensible spoken
+// form keeps its digits.
+var NUMBER_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+var NUMBER_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+function twoDigitWords(n) {
+  if (n < 20) return NUMBER_ONES[n];
+  var t = Math.floor(n / 10), o = n % 10;
+  return NUMBER_TENS[t] + (o ? "-" + NUMBER_ONES[o] : "");
+}
+
+function spellNumber(n) {
+  if (n !== Math.floor(n) || n < 0 || n > 999999) return null;
+  if (n < 100) return twoDigitWords(n);
+  if (n < 1000) {
+    var h = Math.floor(n / 100), r = n % 100;
+    return NUMBER_ONES[h] + " hundred" + (r ? " " + twoDigitWords(r) : "");
+  }
+  if (n < 10000) {
+    if (n >= 2000 && n < 2010) {
+      var o = n % 10;
+      return "two thousand" + (o ? " " + NUMBER_ONES[o] : "");
+    }
+    var pair1 = Math.floor(n / 100), pair2 = n % 100;
+    var second = pair2 === 0 ? "hundred" : (pair2 < 10 ? "oh " + NUMBER_ONES[pair2] : twoDigitWords(pair2));
+    return twoDigitWords(pair1) + " " + second;
+  }
+  var th = Math.floor(n / 1000), rest = n % 1000;
+  var head = spellNumber(th);
+  if (!head) return null;
+  return head + " thousand" + (rest ? " " + spellNumber(rest) : "");
+}
+
 function sortTitleOf(book) {
   var t = String(book.title || "").trim();
-  return t.replace(/^the\\s+/i, "");
+  // Leading articles do not count: A, An and The are skipped, but
+  // only when the article is a whole word, so Annihilation and
+  // Another Day keep their An.
+  t = t.replace(/^(a|an|the)\\s+/i, "");
+  // A leading number reads as words, so 1984 files under Ni.
+  var m = t.match(/^(\\d+)/);
+  if (m) {
+    var spelled = spellNumber(parseInt(m[1], 10));
+    if (spelled) t = spelled + t.slice(m[1].length);
+  }
+  // Punctuation and symbols do not count when alphabetizing, so
+  // Don't files as Dont.
+  return t.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\\s+/g, " ").trim();
 }
 
 function lastNameOf(book) {
@@ -2643,51 +2692,83 @@ function plaqueKeyOf(book) {
   return k || groupLabelOf(book);
 }
 
-function plaquePrefix(key, len) {
-  var p = String(key || "").slice(0, len);
-  if (p && /[a-z]/i.test(p.charAt(0))) p = p.charAt(0).toUpperCase() + p.slice(1);
-  return p;
+// Words of a sort key, split on spaces.
+function keyWords(key) {
+  return String(key || "").trim().split(/\\s+/).filter(function (w) { return !!w; });
 }
 
-// Shortest prefix length that tells two keys apart, so the end of one
-// shelf and the start of the next never read the same.
-function diffPrefixLen(a, b) {
-  var A = String(a || ""), B = String(b || "");
+// Shortest prefix length, at least minLen, that tells word A from
+// word B. When one word is the start of the other, the longer word's
+// full length is the answer.
+function labelPrefixLen(a, b, minLen) {
+  var A = String(a || "").toLowerCase(), B = String(b || "").toLowerCase();
   var max = Math.max(A.length, B.length);
-  for (var k = 1; k <= max; k++) {
+  for (var k = minLen; k <= max; k++) {
     if (A.slice(0, k) !== B.slice(0, k)) return k;
   }
   return max;
 }
 
-// The plaque range for one shelf: first book to last book. The start
-// of the first shelf and the end of the last shelf are one letter,
-// since there is no neighbour to tell apart. Every other edge uses
-// the shortest prefix that differs from the neighbouring shelf, so
-// Albert to Billy then Buddy reads A - Bi and Bu - .... Date sorts
+// The two plaque endpoints for a shelf, from the first and last
+// books' sort keys. The endpoints are short labels, never one letter:
+// two to four letters of the first significant word, spelling the
+// word out and reaching into the next word when the first words
+// match, as in STAR T - STAR W. When the first words share their
+// first two letters the label runs to four letters, as in DARK - DAWN.
+function plaqueEndpoints(firstKey, lastKey) {
+  var fw = keyWords(firstKey), lw = keyWords(lastKey);
+  var s = 0;
+  while (s < fw.length && s < lw.length && fw[s].toLowerCase() === lw[s].toLowerCase()) s++;
+  var up = function (w) { return String(w || "").toUpperCase(); };
+  if (s > 0) {
+    var shared = fw.slice(0, s).map(up).join(" ");
+    if (s >= fw.length && s >= lw.length) return [shared, shared];
+    if (s >= fw.length) return [shared, shared + " " + up(lw[s].slice(0, 1))];
+    if (s >= lw.length) return [shared + " " + up(fw[s].slice(0, 1)), shared];
+    var L = labelPrefixLen(fw[s], lw[s], 1);
+    return [shared + " " + up(fw[s].slice(0, L)), shared + " " + up(lw[s].slice(0, L))];
+  }
+  var len = labelPrefixLen(fw[0], lw[0], 2);
+  if (fw[0].length >= 2 && lw[0].length >= 2 && fw[0].slice(0, 2).toLowerCase() === lw[0].slice(0, 2).toLowerCase()) {
+    len = Math.max(len, 4);
+    len = Math.min(len, Math.max(fw[0].length, lw[0].length));
+  }
+  var a = up(fw[0].slice(0, len)), b = up(lw[0].slice(0, len));
+  if (a.length === 1 && fw.length > 1) a = a + " " + up(fw[1].slice(0, 1));
+  if (b.length === 1 && lw.length > 1) b = b + " " + up(lw[1].slice(0, 1));
+  return [a, b];
+}
+
+// A shelf filled by one series is labelled with the series name and
+// its volume range instead of titles, when every book on it has a
+// book number.
+function seriesPlaque(chunk) {
+  var name = chunk[0].series_name || "";
+  if (!name) return null;
+  var i, pos = [];
+  for (i = 0; i < chunk.length; i++) {
+    var p = chunk[i].series_position;
+    if ((chunk[i].series_name || "") !== name || p === null || p === undefined || p === "") return null;
+    pos.push(Number(p));
+  }
+  var lo = Math.min.apply(null, pos), hi = Math.max.apply(null, pos);
+  return name.toUpperCase() + " " + String(lo) + " - " + String(hi);
+}
+
+// The plaque range for one shelf: first book to last book. Date sorts
 // show the full year range instead.
 function plaqueRangeFor(chunks, i) {
   var first = chunks[i][0];
   var last = chunks[i][chunks[i].length - 1];
-  var start, end;
   if (state.sort === "release" || state.sort === "added") {
-    start = plaqueKeyOf(first) || "No date";
-    end = plaqueKeyOf(last) || "No date";
+    var start = plaqueKeyOf(first) || "No date";
+    var end = plaqueKeyOf(last) || "No date";
     return start + " - " + end;
   }
-  if (i === 0) {
-    start = plaquePrefix(plaqueKeyOf(first), 1);
-  } else {
-    var prevLast = chunks[i - 1][chunks[i - 1].length - 1];
-    start = plaquePrefix(plaqueKeyOf(first), diffPrefixLen(plaqueKeyOf(prevLast), plaqueKeyOf(first)));
-  }
-  if (i === chunks.length - 1) {
-    end = plaquePrefix(plaqueKeyOf(last), 1);
-  } else {
-    var nextFirst = chunks[i + 1][0];
-    end = plaquePrefix(plaqueKeyOf(last), diffPrefixLen(plaqueKeyOf(last), plaqueKeyOf(nextFirst)));
-  }
-  return start + " - " + end;
+  var series = seriesPlaque(chunks[i]);
+  if (series) return series;
+  var ends = plaqueEndpoints(plaqueKeyOf(first), plaqueKeyOf(last));
+  return ends[0] + " - " + ends[1];
 }
 
 // First letters of the first and last book on a shelf, for the
@@ -2708,9 +2789,21 @@ function jumpLetterOf(label) {
   return "#";
 }
 
+// The jump-to row: a letter is on when some shelf holds it. In Spine
+// view each shelf brings the first and last letters of its range, so
+// a letter inside a shelf's range is on too; in Cover view each
+// group is one letter already.
 function renderJumpTo(groups) {
   var present = {};
-  groups.forEach(function (g) { present[jumpLetterOf(g.label)] = true; });
+  groups.forEach(function (g) {
+    if (g.lo && g.hi) {
+      if (g.lo === "#" || g.hi === "#") present["#"] = true;
+      var loC = Math.max(g.lo.charCodeAt(0), 65), hiC = Math.min(g.hi.charCodeAt(0), 90);
+      for (var c = loC; c <= hiC; c++) present[String.fromCharCode(c)] = true;
+    } else {
+      present[jumpLetterOf(g.label)] = true;
+    }
+  });
   var html = "";
   "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(function (letter) {
     html += '<button type="button" class="jumpbtn" data-jump="' + letter + '"' + (present[letter] ? "" : " disabled") + ">" + letter + "</button>";
@@ -2734,9 +2827,10 @@ function render() {
     var layout = spineLayout();
     var chunks = chunkShelves(sorted, layout.count);
     var ranges = chunks.map(function (c, i) { return plaqueRangeFor(chunks, i); });
-    renderJumpTo(chunks.map(function (c, i) { return { label: ranges[i], books: c }; }));
+    var loHis = chunks.map(function (c) { return rangeLoHi(c); });
+    renderJumpTo(chunks.map(function (c, i) { return { label: ranges[i], lo: loHis[i].lo, hi: loHis[i].hi, books: c }; }));
     chunks.forEach(function (chunk, i) {
-      var loHi = rangeLoHi(chunk);
+      var loHi = loHis[i];
       html += '<section class="spineshelf"><div class="plaque" data-lo="' + esc(loHi.lo) + '" data-hi="' + esc(loHi.hi) + '">' + esc(ranges[i]) + "</div>";
       html += '<div class="spinebody"><div class="spinerow">';
       chunk.forEach(function (book) { html += spineBoxHtml(book, layout.width); });
