@@ -870,6 +870,22 @@ function hcCandidateFromDoc(doc) {
   };
 }
 
+async function hcSearchDescription(env, row) {
+  const q = String(row.title || "").trim() + ((row.author || "").trim() ? " " + String(row.author).trim() : "");
+  const s = await hcGraphQL(env, HC_SEARCH_QUERY, { q: q });
+  if (!s || s.rateLimited) return "";
+  const hits = (((s.data.search || {}).results || {}).hits || []);
+  const blankAuthor = !(row.author || "").trim();
+  for (let i = 0; i < hits.length; i++) {
+    const doc = (hits[i] && hits[i].document) || {};
+    const titles = candidateTitlesOf(doc.title || "", doc.subtitle || "");
+    if (!candidateMatches(row, titles, doc.author_names || [], blankAuthor)) continue;
+    const desc = (doc.description || "").trim();
+    if (desc) return desc;
+  }
+  return "";
+}
+
 async function hcLookup(env, row) {
   if (!env.HARDCOVER_API_KEY) return { candidate: null, attempted: false, completed: false };
   const isbn = cleanIsbn(row.isbn || "");
@@ -879,11 +895,15 @@ async function hcLookup(env, row) {
     if (ed) {
       const editions = ed.data.editions || [];
       for (let i = 0; i < editions.length; i++) {
-        const cand = hcCandidateFromEdition(editions[i]);
+        let cand = hcCandidateFromEdition(editions[i]);
         const titles = candidateTitlesOf(cand.title, cand.subtitle);
         if (!titles.some(function (t) { return titleAgrees(row.title || "", t); })) continue;
         const storedAuthor = row.author || "";
         if (storedAuthor.trim() && !cand.authors.some(function (a) { return authorCompatible(storedAuthor, a); })) continue;
+        if (!(cand.description || "").trim() && !(row.description || "").trim()) {
+          const desc = await hcSearchDescription(env, row);
+          if (desc) cand.description = desc;
+        }
         return { candidate: cand, attempted: true, completed: true };
       }
     }
@@ -1700,7 +1720,7 @@ const MANIFEST = {
 };
 
 const SERVICE_WORKER = `
-const CACHE = "bookshelf-v26";
+const CACHE = "bookshelf-v27";
 const STATIC = ["/", "/manifest.json", "/icon.svg"];
 self.addEventListener("install", function (event) {
   event.waitUntil(

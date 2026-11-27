@@ -38,7 +38,7 @@ book's details: title, author, series name, book number, cover photo, descriptio
 year, pages, publisher, ISBN, language, and genres. Tap Refresh beside Edit to look the book up again on the internet
 (Hardcover first, then Google Books, then Open Library) and update its details and cover; the
 refresh overwrites the pulled fields with fresh values, never touches the title, author, reader,
-read mark, your rating, lists, or the locked flag, and works on locked books too. If no source
+read mark, your rating, lists, or the locked flag, and works on locked books too. If the ISBN edition Hardcover returns has no description, the refresh also takes the description from a matching Hardcover title-search record, keeping everything else from the edition. If no source
 has a confident match for the title and author, the refresh says so and changes nothing. The Google rating is pulled from the
 internet and is not editable. Changing only the title or author queues
 a rename of the Dropbox file, and the book still refreshes from the
@@ -190,7 +190,7 @@ and author on that site.
 
 ## Cache version
 
-The service worker cache is named `bookshelf-v26`. When the app shell
+The service worker cache is named `bookshelf-v27`. When the app shell
 changes in a way old cached copies must not serve, bump the version in
 the `CACHE` constant in `worker.js` (for example to `bookshelf-v27`) and
 deploy. The new worker then clears the old cache on activation.
